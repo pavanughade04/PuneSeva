@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: pune-seva
+    runtime: node
+    buildCommand: npm --prefix backend ci
+    startCommand: npm --prefix backend start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL
+        value: "true"
+      - key: SESSION_SECRET
+        sync: false
+      - key: ADMIN_LOGIN_PATH
+        sync: false

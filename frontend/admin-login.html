@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f9fc">
+    <meta name="description" content="Administrator sign in for the Pune Seva service marketplace.">
+    <title>Admin Sign In | Pune Seva</title>
+    <link rel="stylesheet" href="/css/auth.css">
+    <script src="/js/auth.js" defer></script>
+  </head>
+  <body class="auth-page">
+    <main class="auth-layout">
+      <a class="auth-brand" href="/" aria-label="Pune Seva home">
+        <span class="auth-brand-mark" aria-hidden="true">⌂</span>
+        <span>Pune<span>Seva</span></span>
+      </a>
+      <section class="auth-card" aria-labelledby="page-title">
+        <a class="back-link" href="/">← <span>Back to home</span></a>
+        <p class="auth-eyebrow">ADMIN WORKSPACE</p>
+        <h1 id="page-title">Administrator sign in</h1>
+        <p class="auth-intro">Sign in to review provider applications and service listings.</p>
+        <form class="auth-form" data-auth-form data-auth-mode="admin-login" method="post">
+          <p class="form-message auth-origin-warning" data-origin-warning role="alert" hidden>
+            Pune Seva sign in needs the Express server. Open the Pune Seva server origin instead of Live Server or another port.
+          </p>
+          <div class="form-field">
+            <label for="email">Admin email address</label>
+            <input id="email" name="email" type="email" autocomplete="username" maxlength="150" placeholder="admin@example.com" required>
+          </div>
+          <div class="form-field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+          <p class="form-message" data-form-message role="status" aria-live="polite"></p>
+          <button class="auth-submit" type="submit"><span>Sign in as admin</span><span aria-hidden="true">→</span></button>
+        </form>
+        <p class="auth-legal">Administrator accounts are created privately. Public admin registration is not available.</p>
+        <p class="auth-switch">Not an administrator? <a href="/login.html">Use the regular login</a></p>
+      </section>
+      <aside class="auth-aside">
+        <div class="aside-orbit aside-orbit-one"></div><div class="aside-orbit aside-orbit-two"></div>
+        <div class="aside-content">
+          <span class="aside-icon" aria-hidden="true">✦</span>
+          <p class="auth-eyebrow">PUNE SEVA ADMIN</p>
+          <h2>Trusted listings.<br><span>Better local service.</span></h2>
+          <p>Review provider profiles and service listings before they reach Pune customers.</p>
+          <a href="/services.html">View public services <span aria-hidden="true">↗</span></a>
+        </div>
+        <span class="aside-city">BUILT FOR PUNE</span>
+      </aside>
+    </main>
+    <div class="auth-toast" id="auth-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f9fc">
+    <meta name="description" content="Discover approved local service listings in Pune, compare prices, and request bookings with Pune Seva.">
+    <title>Pune Seva | Your City, Your Services, One Platform</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="js/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="Pune Seva home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 42 42" fill="none">
+              <rect width="42" height="42" rx="13" fill="currentColor"/>
+              <path d="M10 19.2 21 10l11 9.2v12.3a1.5 1.5 0 0 1-1.5 1.5h-19a1.5 1.5 0 0 1-1.5-1.5V19.2Z" stroke="white" stroke-width="2.2" stroke-linejoin="round"/>
+              <path d="M17 33v-9h8v9M27.5 16.4h.1" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M30 11v5" stroke="#FF9B55" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="brand-copy"><strong>Pune<span>Seva</span></strong><small>LOCAL HELP, MADE SIMPLE</small></span>
+        </a>
+
+        <button class="menu-toggle" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="primary-navigation">
+          <span></span><span></span><span></span>
+        </button>
+
+        <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation">
+          <a class="nav-link active" href="/">Home</a>
+          <a class="nav-link" href="/services.html">Services</a>
+          <a class="nav-link" href="about.html">About Us</a>
+          <a class="nav-link" href="contact.html">Contact</a>
+          <div class="nav-actions" id="nav-actions">
+  <a class="login-link" href="login.html">Log in</a>
+  <a class="button button-small button-outline" href="register.html">Register</a>
+  <a class="button button-small button-primary provider-nav" href="provider-register.html">
+    Become a Provider <span aria-hidden="true">↗</span>
+  </a>
+</div>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero">
+        <div class="hero-orb hero-orb-one" aria-hidden="true"></div>
+        <div class="hero-orb hero-orb-two" aria-hidden="true"></div>
+        <div class="container hero-layout">
+          <div class="hero-copy">
+            <div class="preview-label"><span class="pulse-dot"></span> A better way to find local help</div>
+            <h1>Find the right help<br>for your <span>home in Pune.</span></h1>
+            <p class="hero-description">From quick fixes to everyday care, discover the service categories you need—all in one local place.</p>
+
+            <form class="search-panel" id="service-search" role="search">
+              <label class="search-label" for="search-input">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.3 4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <span class="sr-only">Search service categories</span>
+              </label>
+              <input id="search-input" name="q" type="search" placeholder="What do you need help with?" autocomplete="off" aria-controls="category-grid">
+              <button class="button button-primary search-button" type="submit">Explore services <span aria-hidden="true">→</span></button>
+            </form>
+            <p class="search-hint">Try “plumber”, “cleaning” or “tutor”</p>
+
+            <div class="hero-footnote">
+              <span class="footnote-icon" aria-hidden="true">⌖</span>
+              <span>Made for Pune. <strong>Built around your everyday.</strong></span>
+            </div>
+          </div>
+
+          <div class="hero-visual" aria-label="Illustration of home services in Pune">
+            <div class="visual-backdrop"></div>
+            <div class="sun-disc" aria-hidden="true"></div>
+            <div class="visual-caption caption-top"><span class="caption-icon orange">✦</span><span><strong>Everyday help</strong><small>All in one place</small></span></div>
+            <svg class="home-illustration" viewBox="0 0 620 510" role="img" aria-labelledby="illustration-title">
+              <title id="illustration-title">A home with local service professionals and tools</title>
+              <ellipse cx="311" cy="459" rx="236" ry="28" fill="#DDE8F4"/>
+              <path d="M102 222 308 76l205 146v207H102V222Z" fill="#fff" stroke="#D8E3F0" stroke-width="5" stroke-linejoin="round"/>
+              <path d="M75 224 308 57l233 167-18 25L308 92 93 249l-18-25Z" fill="#155EEF"/>
+              <path d="M137 242h120v187H137z" fill="#EAF2FF"/>
+              <path d="M157 264h80v142h-80z" fill="#BBD4FF"/>
+              <path d="M196 264v142m-39-71h80" stroke="#fff" stroke-width="7"/>
+              <path d="M322 228h142v87H322z" fill="#F2F6FB"/>
+              <path d="M340 246h105v50H340z" fill="#BFE9E2"/>
+              <path d="M354 246v50m31-50v50m30-50v50" stroke="#fff" stroke-width="5"/>
+              <path d="M291 345h126v84H291z" fill="#FFF2E8"/>
+              <path d="M305 359h98v70h-98z" fill="#FFB979"/>
+              <path d="M352 359v70" stroke="#fff" stroke-width="6"/>
+              <path d="M310 92v56m-8-12h16" stroke="#FF9B55" stroke-width="5" stroke-linecap="round"/>
+              <circle cx="480" cy="118" r="34" fill="#FFECDB"/>
+              <path d="M480 99v38m-19-19h38m-32-13 27 27m0-27-27 27" stroke="#F89B54" stroke-width="3" stroke-linecap="round"/>
+              <path d="M83 379c8-22 8-38 0-51m15 65c10-20 12-36 6-51" stroke="#8AC7B1" stroke-width="7" stroke-linecap="round"/>
+              <path d="M67 419h47l-7 26H74l-7-26Z" fill="#FFB979"/>
+              <path d="M525 367c-5-23-1-41 12-56m-20 73c-14-19-19-36-14-53" stroke="#8AC7B1" stroke-width="7" stroke-linecap="round"/>
+              <path d="M506 419h48l-8 26h-32l-8-26Z" fill="#AEC9FF"/>
+              <g transform="translate(365 315)">
+                <circle cx="39" cy="28" r="25" fill="#F6C8A6"/>
+                <path d="M15 27c0-20 10-30 25-30 13 0 24 8 25 25-9-3-15-9-17-15-7 11-18 17-33 20Z" fill="#28415F"/>
+                <path d="M2 102c3-37 16-57 39-57s36 20 39 57H2Z" fill="#155EEF"/>
+                <path d="M27 67h28l-5 35H32l-5-35Z" fill="#fff"/>
+                <path d="m27 102-8 43m36-43 8 43" stroke="#28415F" stroke-width="12" stroke-linecap="round"/>
+                <path d="m9 69-17 32m86-32 15 26" stroke="#F6C8A6" stroke-width="10" stroke-linecap="round"/>
+                <path d="m88 88 17-20" stroke="#FF9B55" stroke-width="7" stroke-linecap="round"/>
+              </g>
+              <g transform="translate(169 334)">
+                <circle cx="30" cy="21" r="19" fill="#DDA780"/>
+                <path d="M11 20c0-15 8-23 21-23s20 9 20 22c-14 1-24-4-29-11-3 6-7 10-12 12Z" fill="#28415F"/>
+                <path d="M0 94c2-34 12-51 31-51 19 0 30 17 32 51H0Z" fill="#F89B54"/>
+                <path d="m20 59 12 14 12-14" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m17 94-5 43m37-43 7 43" stroke="#28415F" stroke-width="11" stroke-linecap="round"/>
+                <path d="m3 62-18 21m77-21 17 18" stroke="#DDA780" stroke-width="9" stroke-linecap="round"/>
+                <path d="M88 78v-25m-8 8 8-8 8 8" fill="none" stroke="#155EEF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+              </g>
+              <path d="m465 184 7 10 12 2-9 8 2 12-12-6-10 6 2-12-9-8 12-2 5-10Z" fill="#FFB979"/>
+              <circle cx="120" cy="169" r="6" fill="#FF9B55"/>
+              <circle cx="542" cy="298" r="7" fill="#82C8B2"/>
+            </svg>
+            <div class="visual-caption caption-bottom"><span class="caption-icon blue">⌂</span><span><strong>Rooted in Pune</strong><small>Here when you need us</small></span></div>
+          </div>
+        </div>
+        <div class="hero-bottom-line" aria-hidden="true"></div>
+      </section>
+
+      <section class="category-section section-pad" id="categories">
+        <div class="container">
+          <div class="section-heading heading-row">
+            <div>
+              <p class="eyebrow">FIND YOUR SERVICE</p>
+              <h2>What can we help <span>you with?</span></h2>
+              <p class="section-intro">Explore service categories for the jobs that keep your home running.</p>
+            </div>
+            <a class="text-link desktop-link" href="services.html">View all categories <span aria-hidden="true">→</span></a>
+          </div>
+          <p class="results-message" id="search-results" role="status" aria-live="polite"></p>
+          <div class="category-grid" id="category-grid">
+            <button class="category-card" type="button" data-category="electrician" data-search-terms="electrical wiring lights switches electrician">
+              <span class="category-icon icon-blue"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6l1-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span>
+              <span class="category-name">Electrician</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="plumber" data-search-terms="plumbing pipes taps leaks plumber">
+              <span class="category-icon icon-teal"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v5m10-5v5M5 8h14v3a7 7 0 0 1-7 7h-1v3m-1-13v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 21h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+              <span class="category-name">Plumber</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="ac repair" data-search-terms="ac air conditioner cooling repair technician">
+              <span class="category-icon icon-lilac"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 18h10m-8-4v4m6-4v4m-7-9h.01M12 9h.01M16 9h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+              <span class="category-name">AC Repair</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="home cleaning" data-search-terms="cleaning home deep clean housekeeper">
+              <span class="category-icon icon-orange"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 20 9-9m-6 7 3 3m2-18 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 4Zm6 8 .8 2.2L21 15l-2.2.8L18 18l-.8-2.2L15 15l2.2-.8L18 12Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="category-name">Home Cleaning</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="painting" data-search-terms="painting paint walls home painter">
+              <span class="category-icon icon-rose"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 5h16v6H4zM7 11v4h10v-4m-8 4v6m6-6v6m-7 0h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="category-name">Painting</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="carpenter" data-search-terms="carpenter carpentry furniture wood repair">
+              <span class="category-icon icon-gold"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6 4-4 4 4-4 4m-2-2L7 17m-3 3 3-3m-3 3 3 1 1-4m8-11 3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m12 8 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+              <span class="category-name">Carpenter</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="appliance repair" data-search-terms="home appliance refrigerator washing machine appliance repair">
+              <span class="category-icon icon-sky"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M6 10h12m-9-4v1m0 6v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+              <span class="category-name">Appliance Repair</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+            <button class="category-card" type="button" data-category="tutor" data-search-terms="tutor tutoring teacher lessons learning">
+              <span class="category-icon icon-mint"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m2 8 10-5 10 5-10 5L2 8Zm4 2v6c3.5 3 8.5 3 12 0v-6m4-2v7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <span class="category-name">Tutors</span><span class="category-arrow" aria-hidden="true">↗</span>
+            </button>
+          </div>
+          <div class="empty-search" id="empty-search" hidden>
+            <span class="empty-search-icon" aria-hidden="true">⌕</span>
+            <p><strong>No categories found</strong><br>Try a different search, or browse all categories.</p>
+            <button class="text-link reset-search" type="button">Clear search <span aria-hidden="true">→</span></button>
+          </div>
+          <a class="text-link mobile-link" href="services.html">View all categories <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+
+      <section class="popular-section section-pad" id="popular">
+        <div class="container">
+          <div class="section-heading">
+            <p class="eyebrow">A GOOD PLACE TO START</p>
+            <h2>Everyday services, <span>made easier.</span></h2>
+            <p class="section-intro">Browse common home-service categories, then explore current listings and pricing in the services catalog.</p>
+          </div>
+          <div class="popular-grid">
+            <article class="popular-card popular-card-featured" data-popular-category="home cleaning">
+              <div class="popular-card-top"><span class="popular-icon icon-orange"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 20 9-9m-6 7 3 3m2-18 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 4Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="card-kicker">AT HOME</span></div>
+              <div class="popular-art art-cleaning" aria-hidden="true"><span class="art-spark spark-one">✦</span><span class="art-spark spark-two">✧</span><span class="art-bottle"></span><span class="art-cloth"></span></div>
+              <div class="popular-card-copy"><h3>Home cleaning</h3><p>A fresh start for the spaces you call home.</p><button class="text-link category-action" type="button" data-search-category="home cleaning">Explore category <span aria-hidden="true">→</span></button></div>
+            </article>
+            <article class="popular-card" data-popular-category="electrician">
+              <div class="popular-card-top"><span class="popular-icon icon-blue"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m13 2-8 12h6l-1 8 9-13h-6l1-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></span><span class="card-kicker">QUICK FIXES</span></div>
+              <div class="popular-art art-electric" aria-hidden="true"><span class="art-bolt">ϟ</span><span class="art-screw screw-one"></span><span class="art-screw screw-two"></span></div>
+              <div class="popular-card-copy"><h3>Electrical work</h3><p>For switches, lights and those little fixes.</p><button class="text-link category-action" type="button" data-search-category="electrician">Explore category <span aria-hidden="true">→</span></button></div>
+            </article>
+            <article class="popular-card" data-popular-category="plumber">
+              <div class="popular-card-top"><span class="popular-icon icon-teal"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 3v5m10-5v5M5 8h14v3a7 7 0 0 1-7 7h-1v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="card-kicker">HOME CARE</span></div>
+              <div class="popular-art art-plumbing" aria-hidden="true"><span class="pipe-shape"></span><span class="art-drop">•</span><span class="art-drop drop-two">•</span></div>
+              <div class="popular-card-copy"><h3>Plumbing</h3><p>Help with the pipes, taps and leaks at home.</p><button class="text-link category-action" type="button" data-search-category="plumber">Explore category <span aria-hidden="true">→</span></button></div>
+            </article>
+          </div>
+          <p class="demo-note"><span aria-hidden="true">ⓘ</span> Explore approved local listings and request a booking from the services catalog.</p>
+        </div>
+      </section>
+
+      <section class="steps-section section-pad" id="how-it-works">
+        <div class="container steps-layout">
+          <div class="steps-heading">
+            <p class="eyebrow">SIMPLE BY DESIGN</p>
+            <h2>Finding help<br>should feel <span>easy.</span></h2>
+            <p class="section-intro">We’re building a clearer path from “I need a hand” to finding the right local service.</p>
+            <a class="button button-outline" href="services.html">Explore categories <span aria-hidden="true">→</span></a>
+          </div>
+          <div class="steps-list">
+            <article class="step-item">
+              <div class="step-number">01</div>
+              <div class="step-icon step-icon-blue"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4.3 4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div><h3>Search what you need</h3><p>Start with a service category or a quick search.</p></div>
+              <span class="step-line" aria-hidden="true"></span>
+            </article>
+            <article class="step-item">
+              <div class="step-number">02</div>
+              <div class="step-icon step-icon-orange"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="9" cy="8" r="3.5" stroke="currentColor" stroke-width="1.8"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0m3-12a3.5 3.5 0 0 1 0 6.8m1 1.7a5.5 5.5 0 0 1 2 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div><h3>Compare your options</h3><p>Review provider profiles, service details, and current listings.</p></div>
+              <span class="step-line" aria-hidden="true"></span>
+            </article>
+            <article class="step-item">
+              <div class="step-number">03</div>
+              <div class="step-icon step-icon-green"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M16 3v4M8 3v4M3 10h18m-12 4h.01M12 14h.01M15 14h.01M9 17h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+              <div><h3>Request a service</h3><p>Choose an appointment and send a booking request to the provider.</p></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="benefits-section section-pad" id="about">
+        <div class="container">
+          <div class="benefits-panel">
+            <div class="benefits-copy">
+              <p class="eyebrow">WHY PUNE SEVA</p>
+              <h2>Local help.<br><span>Less hassle.</span></h2>
+              <p>A homegrown idea for making it easier to find the everyday services Pune needs.</p>
+              <a class="text-link" href="about.html">A little more about us <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="benefit-grid">
+              <article class="benefit-item"><span class="benefit-icon benefit-blue"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h16m-7-7 7 7-7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h3>Easy to explore</h3><p>Find useful service categories without the extra digging.</p></article>
+              <article class="benefit-item"><span class="benefit-icon benefit-orange"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18m0-18 6 6m-6-6L6 9m6 12 6-6m-6 6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h3>Built for Pune</h3><p>Designed around the needs of our own neighbourhoods.</p></article>
+              <article class="benefit-item"><span class="benefit-icon benefit-green"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s8-4 8-11V5l-8-3-8 3v5c0 7 8 11 8 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h3>Clarity comes first</h3>              <p>Providers and service listings are reviewed, and booking status changes follow clear steps.</p></article>
+              <article class="benefit-item"><span class="benefit-icon benefit-lilac"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.6-.9L4 20l1.9-4.9a7.4 7.4 0 0 1-1-3.6A7.5 7.5 0 1 1 20 11.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></span><h3>Made to grow with you</h3><p>A thoughtful local platform, built one useful step at a time.</p></article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="provider-cta-section" id="provider-cta">
+        <div class="container">
+          <div class="provider-cta">
+            <div class="cta-decoration cta-decoration-one" aria-hidden="true"></div>
+            <div class="cta-decoration cta-decoration-two" aria-hidden="true"></div>
+            <div class="provider-cta-copy">
+              <p class="eyebrow">FOR LOCAL PROFESSIONALS</p>
+              <h2>Good at what you do?<br><span>Let’s build something local.</span></h2>
+              <p>We’re creating a place for Pune’s service professionals to meet the people who need their skills.</p>
+              <a class="button button-light" href="provider-register.html">Register as a provider <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="cta-art" aria-hidden="true">
+              <div class="cta-art-circle"><svg viewBox="0 0 180 180" fill="none"><path d="M32 80 90 32l58 48v61H32V80Z" fill="#fff" stroke="#D9E7FF" stroke-width="4" stroke-linejoin="round"/><path d="m22 80 68-56 68 56-8 10-60-49-60 49-8-10Z" fill="#FFAA68"/><path d="M70 97h40v44H70z" fill="#B8D0FF"/><path d="M84 97v44" stroke="#fff" stroke-width="4"/><circle cx="127" cy="55" r="15" fill="#FFF0E1"/><path d="m127 44 2.7 8.3 8.3 2.7-8.3 2.7-2.7 8.3-2.7-8.3-8.3-2.7 8.3-2.7 2.7-8.3Z" fill="#FFAA68"/></svg></div>
+              <span class="cta-spark cta-spark-one">✦</span><span class="cta-spark cta-spark-two">✧</span><span class="cta-pill">Made for Pune</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <div class="footer-main">
+          <div class="footer-brand">
+            <a class="brand brand-footer" href="/" aria-label="Pune Seva home">
+              <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 42 42" fill="none"><rect width="42" height="42" rx="13" fill="currentColor"/><path d="M10 19.2 21 10l11 9.2v12.3a1.5 1.5 0 0 1-1.5 1.5h-19a1.5 1.5 0 0 1-1.5-1.5V19.2Z" stroke="white" stroke-width="2.2" stroke-linejoin="round"/><path d="M17 33v-9h8v9M27.5 16.4h.1" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 11v5" stroke="#FF9B55" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+              <span class="brand-copy"><strong>Pune<span>Seva</span></strong><small>LOCAL HELP, MADE SIMPLE</small></span>
+            </a>
+            <p>Your City, Your Services, One Platform.<br>Connecting Pune with local services.</p>
+          </div>
+          <div class="footer-column"><h3>Explore</h3><a href="/">Home</a><a href="#categories">Service categories</a><a href="about.html">About us</a><a href="contact.html">Contact</a></div>
+          <div class="footer-column"><h3>Popular categories</h3><a href="#categories" data-footer-category="electrician">Electrician</a><a href="#categories" data-footer-category="plumber">Plumber</a><a href="#categories" data-footer-category="home cleaning">Home cleaning</a><a href="#categories" data-footer-category="tutor">Tutors</a></div>
+          <div class="footer-column footer-contact"><h3>Get in touch</h3><p>Questions or ideas?</p><a href="contact.html">Send us a message <span aria-hidden="true">↗</span></a></div>
+        </div>
+        <div class="footer-bottom"><p>© <span id="current-year">2026</span> Pune Seva. Made with care in Pune.</p><p class="footer-preview">Explore local services in Pune</p></div>
+      </div>
+    </footer>
+
+    <div class="toast-message" id="site-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

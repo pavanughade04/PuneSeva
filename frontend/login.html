@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f9fc">
+    <title>Log in | Pune Seva</title>
+    <link rel="stylesheet" href="css/auth.css">
+    <script src="js/auth.js" defer></script>
+  </head>
+  <body class="auth-page">
+    <main class="auth-layout">
+      <a class="auth-brand" href="/" aria-label="Pune Seva home">
+        <span class="auth-brand-mark" aria-hidden="true">⌂</span>
+        <span>Pune<span>Seva</span></span>
+      </a>
+      <section class="auth-card" aria-labelledby="page-title">
+        <a class="back-link" href="/">← <span>Back to home</span></a>
+        <p class="auth-eyebrow">WELCOME BACK</p>
+        <h1 id="page-title">Log in to Pune Seva</h1>
+        <p class="auth-intro">Sign in to continue to your account.</p>
+        <form class="auth-form" data-auth-form action="/api/auth/login" method="post">
+          <p class="form-message auth-origin-warning" data-origin-warning role="alert" hidden>
+            Pune Seva login needs the Express server. Open
+            <a href="http://localhost:3000/login.html">http://localhost:3000</a>
+            instead of Live Server or another port.
+          </p>
+          <div class="form-field">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" autocomplete="email" maxlength="150" placeholder="you@example.com" required>
+          </div>
+          <div class="form-field">
+            <div class="label-row"><label for="password">Password</label><a class="form-inline-link" href="#forgot-password" data-not-ready="Password recovery">Forgot password?</a></div>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+          <p class="form-message" data-form-message role="status" aria-live="polite"></p>
+          <button class="auth-submit" type="submit"><span>Log in</span><span aria-hidden="true">→</span></button>
+        </form>
+        <p class="auth-switch">New to Pune Seva? <a href="register.html">Create an account</a></p>
+        <p class="auth-provider-switch">Are you a service professional? <a href="provider-register.html">Join as a provider</a></p>
+        <p class="auth-legal">Your account is protected with secure, encrypted password storage.</p>
+      </section>
+      <aside class="auth-aside">
+        <div class="aside-orbit aside-orbit-one"></div><div class="aside-orbit aside-orbit-two"></div>
+        <div class="aside-content">
+          <span class="aside-icon" aria-hidden="true">✦</span>
+          <p class="auth-eyebrow">LOCAL HELP, MADE SIMPLE</p>
+          <h2>Your city.<br>Your services.<br><span>One platform.</span></h2>
+          <p>Find the service categories you need and make Pune Seva part of your everyday.</p>
+          <a href="/#categories">Explore services <span aria-hidden="true">↗</span></a>
+        </div>
+        <span class="aside-city">BUILT FOR PUNE</span>
+      </aside>
+    </main>
+    <div class="auth-toast" id="auth-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

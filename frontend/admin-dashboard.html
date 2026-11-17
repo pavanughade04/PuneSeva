@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <meta name="description" content="Manage Pune Seva customers, providers, services, bookings, reviews, and messages.">
+    <title>Admin Dashboard | Pune Seva</title>
+    <link rel="stylesheet" href="css/customer-dashboard.css">
+    <link rel="stylesheet" href="css/admin-dashboard.css">
+    <script src="js/admin-dashboard.js" defer></script>
+  </head>
+  <body class="dashboard-page admin-dashboard">
+    <div class="dashboard-layout">
+      <button class="sidebar-scrim" type="button" data-sidebar-close aria-label="Close navigation" hidden></button>
+      <aside class="dashboard-sidebar" id="admin-sidebar" aria-label="Admin navigation">
+        <a class="dashboard-brand" href="/" aria-label="Pune Seva home">
+          <span class="brand-mark" aria-hidden="true">⌂</span>
+          <span>Pune<span>Seva</span><small>ADMIN WORKSPACE</small></span>
+        </a>
+        <div class="sidebar-caption">MANAGEMENT</div>
+        <nav class="dashboard-nav" aria-label="Admin sections">
+          <button class="nav-item is-active" type="button" data-section-target="overview" aria-current="page"><span aria-hidden="true">◫</span>Overview</button>
+          <button class="nav-item" type="button" data-section-target="customers"><span aria-hidden="true">♙</span>Customers</button>
+          <button class="nav-item" type="button" data-section-target="providers"><span aria-hidden="true">♧</span>Providers</button>
+          <button class="nav-item" type="button" data-section-target="services"><span aria-hidden="true">✓</span>Services</button>
+          <button class="nav-item" type="button" data-section-target="bookings"><span aria-hidden="true">▤</span>Bookings</button>
+          <button class="nav-item" type="button" data-section-target="reviews"><span aria-hidden="true">☆</span>Reviews</button>
+          <button class="nav-item" type="button" data-section-target="messages"><span aria-hidden="true">✉</span>Contact messages</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <span class="user-avatar" id="admin-avatar" aria-hidden="true">A</span>
+            <span class="sidebar-user-copy"><strong id="admin-name">Loading admin…</strong><small id="admin-email">Administrator</small></span>
+          </div>
+          <button class="sidebar-logout" type="button" id="admin-logout"><span aria-hidden="true">↪</span>Log out</button>
+        </div>
+      </aside>
+
+      <main class="dashboard-main">
+        <header class="dashboard-topbar">
+          <button class="mobile-menu-button" type="button" data-sidebar-toggle aria-controls="admin-sidebar" aria-expanded="false" aria-label="Open navigation">
+            <span></span><span></span><span></span>
+          </button>
+          <div class="topbar-context"><span class="topbar-label">PUNE SEVA ADMIN</span><span id="topbar-section">Overview</span></div>
+          <a class="topbar-home" href="/">Visit Pune Seva <span aria-hidden="true">↗</span></a>
+        </header>
+
+        <div class="dashboard-content">
+          <section class="dashboard-view is-visible" data-section="overview" aria-labelledby="overview-title">
+            <div class="welcome-row">
+              <div><p class="eyebrow">MARKETPLACE OPERATIONS</p><h1 id="overview-title">Admin overview</h1><p class="page-intro">Live totals and recent activity from the Pune Seva database.</p></div>
+              <button class="button button-outline" type="button" data-refresh="overview">Refresh overview</button>
+            </div>
+            <div class="stats-grid admin-stats-grid" aria-label="Marketplace statistics">
+              <article class="stat-card stat-blue"><span class="stat-label">Customers</span><strong id="stat-customers">—</strong></article>
+              <article class="stat-card stat-amber"><span class="stat-label">Providers</span><strong id="stat-providers">—</strong></article>
+              <article class="stat-card stat-green"><span class="stat-label">Services</span><strong id="stat-services">—</strong></article>
+              <article class="stat-card stat-rose"><span class="stat-label">Pending provider approvals</span><strong id="stat-provider-pending">—</strong></article>
+              <article class="stat-card stat-amber"><span class="stat-label">Pending service approvals</span><strong id="stat-service-pending">—</strong></article>
+              <article class="stat-card stat-blue"><span class="stat-label">Bookings</span><strong id="stat-bookings">—</strong></article>
+              <article class="stat-card stat-amber"><span class="stat-label">Pending bookings</span><strong id="stat-booking-pending">—</strong></article>
+              <article class="stat-card stat-green"><span class="stat-label">Completed bookings</span><strong id="stat-booking-completed">—</strong></article>
+              <article class="stat-card stat-rose"><span class="stat-label">Cancelled bookings</span><strong id="stat-booking-cancelled">—</strong></article>
+              <article class="stat-card stat-blue"><span class="stat-label">Reviews</span><strong id="stat-reviews">—</strong></article>
+            </div>
+            <p class="admin-error" id="overview-error" role="alert" hidden></p>
+            <div class="admin-overview-panels">
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">LATEST ACTIVITY</p><h2>Recent bookings</h2></div><button class="text-button" type="button" data-section-target="bookings">View all</button></div><div class="table-wrap"><table><thead><tr><th>Booking</th><th>Customer</th><th>Provider</th><th>Service</th><th>Status</th></tr></thead><tbody id="recent-bookings"></tbody></table></div></section>
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">ONBOARDING</p><h2>Recent provider registrations</h2></div><button class="text-button" type="button" data-section-target="providers">View all</button></div><div class="table-wrap"><table><thead><tr><th>Provider</th><th>Business</th><th>Status</th></tr></thead><tbody id="recent-providers"></tbody></table></div></section>
+              <section class="panel"><div class="panel-heading"><div><p class="eyebrow">LISTINGS</p><h2>Recent service submissions</h2></div><button class="text-button" type="button" data-section-target="services">View all</button></div><div class="table-wrap"><table><thead><tr><th>Service</th><th>Provider</th><th>Category</th><th>Status</th></tr></thead><tbody id="recent-services"></tbody></table></div></section>
+            </div>
+          </section>
+
+          <section class="dashboard-view" data-section="customers" aria-labelledby="customers-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">ACCOUNT MANAGEMENT</p><h1 id="customers-title">Customers</h1><p class="page-intro">Search accounts, review booking history, and manage account access.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="customers" role="search">
+                <label>Search customers<input name="search" type="search" maxlength="100" placeholder="Name, email or phone"></label>
+                <label>Account status<select name="status"><option value="all">All statuses</option><option value="active">Active</option><option value="blocked">Blocked</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="customers" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Contact</th><th>Bookings</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead><tbody id="customers-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="customers" hidden>No customers match these filters.</p>
+              <p class="loading-state" data-loading="customers" hidden>Loading customers…</p>
+              <div class="admin-pagination" data-pagination="customers"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-section="providers" aria-labelledby="providers-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">PROVIDER ONBOARDING</p><h1 id="providers-title">Providers</h1><p class="page-intro">Review applications, inspect provider activity, and manage account access.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="providers" role="search">
+                <label>Search providers<input name="search" type="search" maxlength="100" placeholder="Name, email, business or area"></label>
+                <label>Application status<select name="status"><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
+                <label>Account status<select name="accountStatus"><option value="all">All statuses</option><option value="active">Active</option><option value="blocked">Blocked</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="providers" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Provider / business</th><th>Contact</th><th>Area</th><th>Application</th><th>Account</th><th>Actions</th></tr></thead><tbody id="providers-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="providers" hidden>No providers match these filters.</p>
+              <p class="loading-state" data-loading="providers" hidden>Loading providers…</p>
+              <div class="admin-pagination" data-pagination="providers"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-section="services" aria-labelledby="services-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">MARKETPLACE QUALITY</p><h1 id="services-title">Services</h1><p class="page-intro">Review listings and control whether approved services are available to customers.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="services" role="search">
+                <label>Search services<input name="search" type="search" maxlength="100" placeholder="Service, category or provider"></label>
+                <label>Category<input name="category" type="text" maxlength="100" placeholder="Any category"></label>
+                <label>Provider ID<input name="providerId" type="number" min="1" step="1" placeholder="Any provider"></label>
+                <label>Approval status<select name="status"><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="services" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Provider</th><th>Category / location</th><th>Price</th><th>Availability</th><th>Approval</th><th>Actions</th></tr></thead><tbody id="services-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="services" hidden>No services match these filters.</p>
+              <p class="loading-state" data-loading="services" hidden>Loading services…</p>
+              <div class="admin-pagination" data-pagination="services"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-section="bookings" aria-labelledby="bookings-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">SERVICE ACTIVITY</p><h1 id="bookings-title">Bookings</h1><p class="page-intro">Review appointment details and cancel eligible bookings with a recorded reason.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="bookings" role="search">
+                <label>Search bookings<input name="search" type="search" maxlength="100" placeholder="Booking ID, customer, provider or service"></label>
+                <label>Status<select name="status"><option value="all">All statuses</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="rejected">Rejected</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="bookings" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Booking</th><th>Customer</th><th>Provider</th><th>Service</th><th>Appointment</th><th>Amount</th><th>Status / actions</th></tr></thead><tbody id="bookings-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="bookings" hidden>No bookings match these filters.</p>
+              <p class="loading-state" data-loading="bookings" hidden>Loading bookings…</p>
+              <div class="admin-pagination" data-pagination="bookings"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-section="reviews" aria-labelledby="reviews-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">CUSTOMER FEEDBACK</p><h1 id="reviews-title">Reviews</h1><p class="page-intro">Review feedback and remove inappropriate content with a recorded reason.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="reviews" role="search">
+                <label>Search reviews<input name="search" type="search" maxlength="100" placeholder="Customer, provider, service or text"></label>
+                <label>Rating<select name="rating"><option value="">All ratings</option><option value="5">5 stars</option><option value="4">4 stars</option><option value="3">3 stars</option><option value="2">2 stars</option><option value="1">1 star</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="reviews" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Review</th><th>Customer</th><th>Provider / service</th><th>Rating</th><th>Date</th><th>Actions</th></tr></thead><tbody id="reviews-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="reviews" hidden>No reviews match these filters.</p>
+              <p class="loading-state" data-loading="reviews" hidden>Loading reviews…</p>
+              <div class="admin-pagination" data-pagination="reviews"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-section="messages" aria-labelledby="messages-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">CUSTOMER SUPPORT</p><h1 id="messages-title">Contact messages</h1><p class="page-intro">Search messages and track their resolution status.</p></div></div>
+            <section class="panel">
+              <form class="admin-filters" data-filter-form="messages" role="search">
+                <label>Search messages<input name="search" type="search" maxlength="100" placeholder="Name, email, subject or message"></label>
+                <label>Status<select name="status"><option value="all">All statuses</option><option value="new">New</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option></select></label>
+                <button class="button button-primary" type="submit">Search</button>
+              </form>
+              <p class="admin-error" data-error="messages" role="alert" hidden></p>
+              <div class="table-wrap"><table><thead><tr><th>Sender</th><th>Subject</th><th>Received</th><th>Status</th><th>Actions</th></tr></thead><tbody id="messages-rows"></tbody></table></div>
+              <p class="empty-state" data-empty="messages" hidden>No messages match these filters.</p>
+              <p class="loading-state" data-loading="messages" hidden>Loading messages…</p>
+              <div class="admin-pagination" data-pagination="messages"><button class="button button-outline" type="button" data-page="previous">Previous</button><span data-page-label></span><button class="button button-outline" type="button" data-page="next">Next</button></div>
+            </section>
+          </section>
+
+          <footer class="dashboard-footer"><span>© <span id="current-year"></span> Pune Seva</span><a href="/">Back to Pune Seva <span aria-hidden="true">↗</span></a></footer>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="admin-dialog" id="admin-detail-dialog" aria-labelledby="admin-detail-title">
+      <div class="dialog-heading"><div><p class="eyebrow">PUNE SEVA ADMIN</p><h2 id="admin-detail-title">Details</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="Close details">×</button></div>
+      <div class="admin-detail-content" id="admin-detail-content"></div>
+      <div class="dialog-actions"><button class="button button-outline" type="button" data-close-dialog>Close</button></div>
+    </dialog>
+    <dialog class="admin-dialog" id="admin-reason-dialog" aria-labelledby="admin-reason-title">
+      <form id="admin-reason-form">
+        <div class="dialog-heading"><div><p class="eyebrow">RECORD AN ADMIN REASON</p><h2 id="admin-reason-title">Provide a reason</h2></div><button class="icon-button" type="button" data-close-dialog aria-label="Close reason form">×</button></div>
+        <label class="admin-reason-label" for="admin-action-reason">Reason (5–1,000 characters)
+          <textarea id="admin-action-reason" name="reason" minlength="5" maxlength="1000" rows="4" required></textarea>
+        </label>
+        <p class="admin-error" id="admin-reason-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="button button-outline" type="button" data-close-dialog>Cancel</button><button class="button button-danger" type="submit">Continue</button></div>
+      </form>
+    </dialog>
+    <div class="dashboard-toast" id="admin-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

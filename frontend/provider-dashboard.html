@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>Provider Dashboard | Pune Seva</title>
+    <link rel="stylesheet" href="css/customer-dashboard.css">
+    <link rel="stylesheet" href="css/provider-dashboard.css">
+    <script src="js/provider-dashboard.js" defer></script>
+  </head>
+  <body class="dashboard-page provider-dashboard" data-dashboard-role="provider">
+    <div class="dashboard-layout">
+      <button class="sidebar-scrim" type="button" data-sidebar-close aria-label="Close navigation" hidden></button>
+      <aside class="dashboard-sidebar" id="dashboard-sidebar" aria-label="Provider navigation">
+        <a class="dashboard-brand" href="/" aria-label="Pune Seva home">
+          <span class="brand-mark" aria-hidden="true">⌂</span>
+          <span>Pune<span>Seva</span><small>PROVIDER SPACE</small></span>
+        </a>
+        <div class="sidebar-caption">WORKSPACE</div>
+        <nav class="dashboard-nav" aria-label="Dashboard sections">
+          <button type="button" class="nav-item is-active" data-view-target="overview" aria-current="page"><span aria-hidden="true">⌂</span>Overview</button>
+          <button type="button" class="nav-item" data-view-target="services"><span aria-hidden="true">▦</span>My services</button>
+          <button type="button" class="nav-item" data-view-target="bookings"><span aria-hidden="true">▤</span>Bookings</button>
+          <button type="button" class="nav-item" data-view-target="profile"><span aria-hidden="true">◉</span>Business profile</button>
+          <button type="button" class="nav-item" data-view-target="settings"><span aria-hidden="true">⚙</span>Account settings</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="sidebar-user">
+            <span class="user-avatar" id="sidebar-avatar" aria-hidden="true">P</span>
+            <span class="sidebar-user-copy"><strong id="sidebar-name">Loading account…</strong><small>Service provider</small></span>
+          </div>
+          <button class="sidebar-logout" type="button" data-logout><span aria-hidden="true">↪</span>Log out</button>
+        </div>
+      </aside>
+
+      <main class="dashboard-main">
+        <header class="dashboard-topbar">
+          <button class="mobile-menu-button" type="button" data-sidebar-toggle aria-controls="dashboard-sidebar" aria-expanded="false" aria-label="Open navigation">
+            <span></span><span></span><span></span>
+          </button>
+          <div class="topbar-context"><span class="topbar-label">PROVIDER DASHBOARD</span><span id="topbar-date"></span></div>
+          <a class="topbar-home" href="/">Visit Pune Seva <span aria-hidden="true">↗</span></a>
+        </header>
+
+        <div class="dashboard-content">
+          <section class="dashboard-view is-visible" data-view="overview" aria-labelledby="overview-title">
+            <div class="welcome-row">
+              <div>
+                <p class="eyebrow">YOUR LOCAL BUSINESS WORKSPACE</p>
+                <h1 id="overview-title">Welcome, <span id="welcome-name">there</span></h1>
+                <p class="page-intro"><span id="welcome-business">Loading your business…</span> · Keep your services and bookings organized.</p>
+              </div>
+              <button class="button button-primary" type="button" data-view-target="services">Manage services <span aria-hidden="true">→</span></button>
+            </div>
+
+            <div class="approval-banner" id="approval-banner" role="status" hidden>
+              <span class="approval-icon" aria-hidden="true">ⓘ</span>
+              <div><strong id="approval-title">Application status</strong><p id="approval-copy"></p></div>
+            </div>
+
+            <div class="stats-grid" aria-label="Business summary">
+              <article class="stat-card stat-blue"><span class="stat-icon" aria-hidden="true">▦</span><span class="stat-label">Total services</span><strong id="stat-services">—</strong><small>Your service listings</small></article>
+              <article class="stat-card stat-amber"><span class="stat-icon" aria-hidden="true">▤</span><span class="stat-label">Total bookings</span><strong id="stat-bookings">—</strong><small>Bookings received</small></article>
+              <article class="stat-card stat-rose"><span class="stat-icon" aria-hidden="true">◷</span><span class="stat-label">Pending bookings</span><strong id="stat-pending">—</strong><small>Need your response</small></article>
+              <article class="stat-card stat-green"><span class="stat-icon" aria-hidden="true">✓</span><span class="stat-label">Completed</span><strong id="stat-completed">—</strong><small>Jobs completed</small></article>
+            </div>
+
+            <section class="panel" aria-labelledby="recent-bookings-title">
+              <div class="panel-heading">
+                <div><p class="eyebrow">CUSTOMER REQUESTS</p><h2 id="recent-bookings-title">Recent bookings</h2></div>
+                <button class="text-button" type="button" data-view-target="bookings">View all bookings <span aria-hidden="true">→</span></button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Customer</th><th>Service</th><th>Date &amp; time</th><th>Status</th><th>Amount</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                  <tbody id="recent-booking-rows"></tbody>
+                </table>
+              </div>
+              <p class="empty-state" id="recent-bookings-empty" hidden>No customer bookings yet. Keep your service details up to date.</p>
+              <p class="loading-state" data-loading="recent-bookings">Loading your bookings…</p>
+            </section>
+
+            <div class="overview-bottom">
+              <section class="panel profile-summary" aria-labelledby="business-summary-title">
+                <div class="panel-heading"><div><p class="eyebrow">YOUR BUSINESS</p><h2 id="business-summary-title">Profile details</h2></div><button class="text-button" type="button" data-view-target="profile">Edit profile <span aria-hidden="true">→</span></button></div>
+                <dl class="profile-details">
+                  <div><dt>Business name</dt><dd id="overview-business">Loading…</dd></div>
+                  <div><dt>Experience</dt><dd id="overview-experience">—</dd></div>
+                  <div><dt>Service area</dt><dd id="overview-area">—</dd></div>
+                </dl>
+              </section>
+              <aside class="browse-callout"><span class="callout-mark" aria-hidden="true">✦</span><p class="eyebrow">GROW LOCAL</p><h2>Your skills make a difference.</h2><p>Keep your profile clear so Pune customers can learn about your work.</p><button class="button button-light" type="button" data-view-target="profile">Update profile <span aria-hidden="true">→</span></button></aside>
+            </div>
+          </section>
+
+          <section class="dashboard-view" data-view="services" aria-labelledby="services-title" hidden>
+            <div class="section-heading">
+              <div><p class="eyebrow">YOUR LISTINGS</p><h1 id="services-title">My services</h1><p class="page-intro">Create and manage the services you offer.</p></div>
+              <button class="button button-primary" type="button" id="add-service-button"><span aria-hidden="true">＋</span>Add a service</button>
+            </div>
+            <div class="stats-grid service-status-grid" aria-label="Service approval summary">
+              <article class="stat-card stat-blue"><span class="stat-label">Total services</span><strong id="service-stat-total">—</strong></article>
+              <article class="stat-card stat-green"><span class="stat-label">Approved</span><strong id="service-stat-approved">—</strong></article>
+              <article class="stat-card stat-amber"><span class="stat-label">Pending approval</span><strong id="service-stat-pending">—</strong></article>
+              <article class="stat-card stat-rose"><span class="stat-label">Rejected</span><strong id="service-stat-rejected">—</strong></article>
+            </div>
+            <div class="provider-notice" id="service-approval-note" hidden></div>
+            <section class="panel service-form-panel" id="service-form-panel" hidden aria-labelledby="service-form-title">
+              <div class="panel-heading"><div><p class="eyebrow">SERVICE INFORMATION</p><h2 id="service-form-title">Add a service</h2></div><button class="icon-button" type="button" id="cancel-service-edit" aria-label="Close service form">×</button></div>
+              <form id="service-form" class="dashboard-form">
+                <input type="hidden" name="serviceId">
+                <label>Service name<input name="serviceName" type="text" minlength="2" maxlength="150" placeholder="e.g. Home electrical repair" required></label>
+                <label>Category<input name="category" type="text" list="service-category-options" minlength="2" maxlength="100" placeholder="e.g. Electrician" required></label>
+                <datalist id="service-category-options">
+                  <option value="Electrician"></option><option value="Plumber"></option><option value="AC Repair"></option><option value="Cleaning"></option><option value="Painting"></option><option value="Carpenter"></option><option value="Home Tutor"></option><option value="Pest Control"></option><option value="Appliance Repair"></option><option value="Other"></option>
+                </datalist>
+                <label>Description<textarea name="description" rows="3" maxlength="2000" placeholder="Tell customers what this service includes."></textarea></label>
+                <label>Service location<input name="location" type="text" minlength="2" maxlength="160" placeholder="e.g. Kothrud, Pune" required></label>
+                <label class="form-field-full">Service image (optional)<input name="image" type="file" accept="image/jpeg,image/png,image/webp"><small>JPEG, PNG, or WebP; up to 5 MB.</small></label>
+                <img class="service-image-preview" id="service-image-preview" alt="Selected service image preview" hidden>
+                <label>Price (₹)<input name="price" type="number" min="0" max="99999999.99" step="0.01" required></label>
+                <label>Price type<select name="priceType" required><option value="fixed">Fixed</option><option value="hourly">Hourly</option><option value="starting_from">Starting from</option></select></label>
+                <label class="availability-control"><input name="isAvailable" type="checkbox" value="true"><span>Service is available</span></label>
+                <p class="provider-form-hint" id="service-form-hint"></p>
+                <div class="form-actions"><div class="form-buttons"><button class="button button-outline" type="button" id="discard-service">Discard</button><button class="button button-primary" type="submit">Save service</button></div></div>
+                <p class="inline-message" data-service-message role="status" aria-live="polite"></p>
+              </form>
+            </section>
+            <div class="service-grid provider-service-grid" id="provider-service-list"></div>
+            <p class="empty-state panel" id="provider-services-empty" hidden>You haven’t added a service yet. Add one to get started.</p>
+            <p class="loading-state panel" data-loading="services">Loading your services…</p>
+          </section>
+
+          <section class="dashboard-view" data-view="bookings" aria-labelledby="bookings-title" hidden>
+            <div class="section-heading">
+              <div><p class="eyebrow">CUSTOMER REQUESTS</p><h1 id="bookings-title">Bookings</h1><p class="page-intro">Review requests and update their status.</p></div>
+              <label class="filter-label" for="booking-filter">Filter by status<select id="booking-filter"><option value="all">All bookings</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="rejected">Rejected</option></select></label>
+            </div>
+            <section class="panel">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Booking</th><th>Customer</th><th>Service</th><th>Date &amp; time</th><th>Status</th><th>Total</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                  <tbody id="booking-rows"></tbody>
+                </table>
+              </div>
+              <p class="empty-state" id="bookings-empty" hidden>No bookings match this selection.</p>
+              <p class="loading-state" data-loading="bookings">Loading your bookings…</p>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-view="profile" aria-labelledby="profile-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">BUSINESS INFORMATION</p><h1 id="profile-title">Business profile</h1><p class="page-intro">Help customers understand your experience and service area.</p></div></div>
+            <section class="panel form-panel">
+              <div class="panel-heading"><div><p class="eyebrow">PROVIDER ACCOUNT</p><h2>Profile information</h2></div></div>
+              <form id="profile-form" class="dashboard-form">
+                <label>Your full name<input name="fullName" type="text" autocomplete="name" minlength="2" maxlength="100" required></label>
+                <label>Email address<input name="email" type="email" autocomplete="email" readonly></label>
+                <label>Phone number<input name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="16" placeholder="e.g. +919876543210"></label>
+                <label>Business name<input name="businessName" type="text" minlength="2" maxlength="150" required></label>
+                <label>Years of experience<input name="experience" type="number" min="0" max="60" step="1" required></label>
+                <label>Service area<input name="serviceArea" type="text" minlength="2" maxlength="150" required></label>
+                <label class="form-field-full">Business description<textarea name="description" rows="4" minlength="20" maxlength="2000" required></textarea></label>
+                <div class="form-actions"><p class="form-note">Approval status can only be changed by an administrator.</p><button class="button button-primary" type="submit">Save changes</button></div>
+                <p class="inline-message" data-profile-message role="status" aria-live="polite"></p>
+              </form>
+            </section>
+          </section>
+
+          <section class="dashboard-view" data-view="settings" aria-labelledby="settings-title" hidden>
+            <div class="section-heading"><div><p class="eyebrow">ACCOUNT PREFERENCES</p><h1 id="settings-title">Account settings</h1><p class="page-intro">Manage your Pune Seva provider session.</p></div></div>
+            <section class="panel settings-panel">
+              <span class="settings-icon" aria-hidden="true">◉</span>
+              <div><h2>Signed in as <span id="settings-email">Loading…</span></h2><p>Your provider account is protected by a secure session.</p></div>
+              <button class="button button-danger" type="button" data-logout>Log out</button>
+            </section>
+          </section>
+
+          <footer class="dashboard-footer"><span>© <span id="current-year"></span> Pune Seva</span><a href="/">Back to Pune Seva <span aria-hidden="true">↗</span></a></footer>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="booking-dialog" id="booking-dialog" aria-labelledby="booking-dialog-title">
+      <div class="dialog-heading"><div><p class="eyebrow">BOOKING DETAILS</p><h2 id="booking-dialog-title">Booking</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close booking details">×</button></div>
+      <dl class="dialog-details" id="booking-dialog-details"></dl>
+      <div class="dialog-actions"><button class="button button-outline" type="button" data-dialog-close>Close</button><div class="booking-status-actions" id="booking-status-actions"></div></div>
+    </dialog>
+    <div class="dashboard-toast" id="dashboard-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
