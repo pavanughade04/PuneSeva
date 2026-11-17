@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const http = require('node:http');
+const path = require('node:path');
 const { after, test } = require('node:test');
 const express = require('express');
 const { requireRole } = require('../middleware/auth');
@@ -47,6 +48,20 @@ function adminApp(pool, role = 'admin') {
   }, requireRole('admin'), createAdminRouter({ pool }));
   return app;
 }
+
+test('public services page is served by the frontend static route', async (t) => {
+  const frontendPath = path.join(__dirname, '..', '..', 'frontend');
+  const server = await startServer((app) => app.use(express.static(frontendPath)));
+  t.after(() => server.close());
+
+  const response = await fetch(`${server.baseUrl}/services.html`);
+  const page = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  assert.match(page, /id="catalog-filters"/);
+  assert.match(page, /src="\/js\/services\.js"/);
+});
 
 test('public search only queries approved, available services and returns JSON', async (t) => {
   let executed;

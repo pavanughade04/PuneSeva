@@ -79,10 +79,12 @@ document.addEventListener('keydown', (event) => {
 
 searchInput?.addEventListener('input', () => setCategoryFilter(searchInput.value));
 
-searchForm?.addEventListener('submit', (event) => {
-  event.preventDefault();
-  setCategoryFilter(searchInput.value, { scroll: true });
-});
+if (searchForm && searchInput) {
+  searchForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    setCategoryFilter(searchInput.value, { scroll: true });
+  });
+}
 
 document.querySelectorAll('[data-search-category]').forEach((button) => {
   button.addEventListener('click', () => {

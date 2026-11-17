@@ -42,6 +42,7 @@ Pune Seva is a local-services marketplace for customers and service professional
 ```text
 frontend/
   index.html
+  services.html
   login.html
   register.html
   provider-register.html

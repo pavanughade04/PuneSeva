@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f9fc">
+    <meta name="description" content="Browse approved service listings in Pune, compare prices, and request a booking with Pune Seva.">
+    <title>Services | Pune Seva</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/info-pages.css">
+    <link rel="stylesheet" href="/css/services-page.css">
+    <script src="/js/app.js" defer></script>
+    <script src="/js/services.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="Pune Seva home">
+          <span class="brand-mark" aria-hidden="true">⌂</span>
+          <span class="brand-copy"><strong>Pune<span>Seva</span></strong><small>LOCAL HELP, MADE SIMPLE</small></span>
+        </a>
+        <button class="menu-toggle" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="primary-navigation"><span></span><span></span><span></span></button>
+        <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation">
+          <a class="nav-link" href="/">Home</a>
+          <a class="nav-link active" href="/services.html" aria-current="page">Services</a>
+          <a class="nav-link" href="/about.html">About Us</a>
+          <a class="nav-link" href="/contact.html">Contact</a>
+          <div class="nav-actions" id="nav-actions">
+            <a class="login-link" href="/login.html">Log in</a>
+            <a class="button button-small button-outline" href="/register.html">Register</a>
+            <a class="button button-small button-primary provider-nav" href="/provider-register.html">Become a Provider <span aria-hidden="true">↗</span></a>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="info-hero">
+        <div class="container">
+          <p class="eyebrow">LOCAL PROFESSIONALS</p>
+          <h1>Find a service <span>near you.</span></h1>
+          <p class="section-intro">Browse approved services from Pune providers, compare details, and request a booking.</p>
+        </div>
+      </section>
+
+      <section class="catalog-section">
+        <div class="container">
+          <form id="catalog-filters" class="catalog-filters" role="search">
+            <label for="service-search">Search services
+              <input id="service-search" name="search" type="search" maxlength="100" placeholder="Try cleaning or plumbing">
+            </label>
+            <label for="service-category">Category
+              <select id="service-category" name="category"><option value="">All categories</option></select>
+            </label>
+            <label for="service-location">Location
+              <select id="service-location" name="location"><option value="">All Pune</option></select>
+            </label>
+            <label for="service-sort">Sort by
+              <select id="service-sort" name="sort">
+                <option value="newest">Newest</option>
+                <option value="price_asc">Price: low to high</option>
+                <option value="price_desc">Price: high to low</option>
+              </select>
+            </label>
+            <button class="button button-primary" type="submit">Search</button>
+            <button class="button button-outline" type="reset">Clear</button>
+          </form>
+
+          <p id="catalog-error" class="catalog-message" role="alert" hidden></p>
+          <p id="catalog-loading" class="catalog-state loading-state" role="status">Loading available services…</p>
+          <div id="service-results" class="catalog-grid" aria-live="polite"></div>
+          <p id="catalog-empty" class="catalog-state" hidden>No approved services are available for these filters yet.</p>
+        </div>
+      </section>
+
+      <dialog id="service-dialog" class="service-dialog" aria-labelledby="service-dialog-title">
+        <div class="service-dialog-heading">
+          <div>
+            <p id="service-dialog-category" class="eyebrow"></p>
+            <h2 id="service-dialog-title">Service details</h2>
+          </div>
+          <button class="icon-button" type="button" data-service-dialog-close aria-label="Close service details">×</button>
+        </div>
+        <img id="service-dialog-image" class="service-dialog-image" alt="" hidden>
+        <p id="service-dialog-price" class="service-dialog-price"></p>
+        <p id="service-dialog-description" class="service-dialog-description"></p>
+        <dl class="service-dialog-details">
+          <div><dt>Business</dt><dd id="service-dialog-business"></dd></div>
+          <div><dt>Provider</dt><dd id="service-dialog-provider"></dd></div>
+          <div><dt>Location</dt><dd id="service-dialog-location"></dd></div>
+          <div><dt>Service area</dt><dd id="service-dialog-area"></dd></div>
+          <div><dt>Availability</dt><dd id="service-dialog-availability"></dd></div>
+          <div><dt>Listed</dt><dd id="service-dialog-created"></dd></div>
+        </dl>
+        <button id="book-service-button" class="button button-primary" type="button">Book this service</button>
+      </dialog>
+
+      <dialog id="booking-form-dialog" class="service-dialog booking-form-dialog" aria-labelledby="booking-form-title">
+        <div class="service-dialog-heading">
+          <div>
+            <p class="eyebrow">BOOKING REQUEST</p>
+            <h2 id="booking-form-title">Book a service</h2>
+          </div>
+          <button class="icon-button" type="button" data-booking-dialog-close aria-label="Close booking form">×</button>
+        </div>
+        <p id="booking-service-summary" class="booking-service-summary"></p>
+        <p id="booking-price-summary" class="booking-price-summary"></p>
+        <p id="booking-login-prompt" class="catalog-state" hidden>Please <a href="/login.html">log in as a customer</a> to request a booking.</p>
+        <p id="booking-message" class="catalog-message" role="status" hidden></p>
+        <form id="booking-form" class="booking-form" hidden>
+          <label for="booking-date">Date
+            <input id="booking-date" name="bookingDate" type="date" required>
+          </label>
+          <label for="booking-time">Time
+            <input id="booking-time" name="bookingTime" type="time" required>
+          </label>
+          <label for="booking-address">Service address
+            <textarea id="booking-address" name="address" rows="2" maxlength="500" required></textarea>
+          </label>
+          <label for="booking-phone">Phone
+            <input id="booking-phone" name="phone" type="tel" autocomplete="tel" maxlength="20" required>
+          </label>
+          <label for="booking-notes">Notes (optional)
+            <textarea id="booking-notes" name="notes" rows="3" maxlength="2000"></textarea>
+          </label>
+          <button class="button button-primary" type="submit">Send booking request</button>
+        </form>
+      </dialog>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <div class="footer-main">
+          <div class="footer-brand">
+            <a class="brand brand-footer" href="/" aria-label="Pune Seva home"><span class="brand-mark" aria-hidden="true">⌂</span><span class="brand-copy"><strong>Pune<span>Seva</span></strong><small>LOCAL HELP, MADE SIMPLE</small></span></a>
+            <p>Your City, Your Services, One Platform.<br>Connecting Pune with local services.</p>
+          </div>
+          <div class="footer-column"><h3>Explore</h3><a href="/">Home</a><a href="/services.html">Services</a><a href="/about.html">About us</a><a href="/contact.html">Contact</a></div>
+          <div class="footer-column"><h3>Get started</h3><a href="/register.html">Customer account</a><a href="/provider-register.html">Provider registration</a><a href="/login.html">Log in</a></div>
+        </div>
+        <div class="footer-bottom"><p>© <span id="current-year">2026</span> Pune Seva. Made with care in Pune.</p><p class="footer-preview">Local services, one place.</p></div>
+      </div>
+    </footer>
+  </body>
+</html>
