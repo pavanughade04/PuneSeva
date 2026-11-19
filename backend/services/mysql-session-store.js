@@ -1,3 +1,4 @@
+
 const session = require('express-session');
 
 class MySQLSessionStore extends session.Store {
@@ -6,7 +7,7 @@ class MySQLSessionStore extends session.Store {
     this.pool = pool;
   }
 
-  async initialize() {
+  async initialize({ serverless = false } = {}) {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS sessions (
         session_id VARCHAR(128) NOT NULL,
@@ -17,10 +18,23 @@ class MySQLSessionStore extends session.Store {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     `);
 
+    if (serverless) {
+      await this.pool.execute(
+        'DELETE FROM sessions WHERE expires <= ?',
+        [Math.floor(Date.now() / 1000)]
+      );
+      return;
+    }
+
     this.cleanupTimer = setInterval(() => {
-      this.pool.execute('DELETE FROM sessions WHERE expires <= ?', [Math.floor(Date.now() / 1000)])
-        .catch((error) => console.error('Session cleanup failed:', error.message));
+      this.pool.execute(
+        'DELETE FROM sessions WHERE expires <= ?',
+        [Math.floor(Date.now() / 1000)]
+      ).catch((error) =>
+        console.error('Session cleanup failed:', error.message)
+      );
     }, 15 * 60 * 1000);
+
     this.cleanupTimer.unref();
   }
 
@@ -30,8 +44,12 @@ class MySQLSessionStore extends session.Store {
       [sessionId]
     ).then(async ([rows]) => {
       if (rows.length === 0) return callback(null, null);
+
       if (rows[0].expires <= Math.floor(Date.now() / 1000)) {
-        await this.pool.execute('DELETE FROM sessions WHERE session_id = ?', [sessionId]);
+        await this.pool.execute(
+          'DELETE FROM sessions WHERE session_id = ?',
+          [sessionId]
+        );
         return callback(null, null);
       }
 
@@ -68,9 +86,10 @@ class MySQLSessionStore extends session.Store {
   }
 
   destroy(sessionId, callback = () => {}) {
-    this.pool.execute('DELETE FROM sessions WHERE session_id = ?', [sessionId])
-      .then(() => callback(null))
-      .catch(callback);
+    this.pool.execute(
+      'DELETE FROM sessions WHERE session_id = ?',
+      [sessionId]
+    ).then(() => callback(null)).catch(callback);
   }
 }
 

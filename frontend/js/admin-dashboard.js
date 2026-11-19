@@ -1,3 +1,4 @@
+
 const adminSections = ['customers', 'providers', 'services', 'bookings', 'reviews', 'messages'];
 const sectionState = Object.fromEntries(adminSections.map((name) => [name, {
   page: 1,
@@ -6,6 +7,7 @@ const sectionState = Object.fromEntries(adminSections.map((name) => [name, {
   loaded: false,
   records: new Map()
 }]));
+
 const sectionRoutes = {
   customers: { url: '/api/admin/customers', key: 'customers' },
   providers: { url: '/api/admin/providers', key: 'providers' },
@@ -14,6 +16,7 @@ const sectionRoutes = {
   reviews: { url: '/api/admin/reviews', key: 'reviews' },
   messages: { url: '/api/admin/messages', key: 'messages' }
 };
+
 const adminToast = document.querySelector('#admin-toast');
 const detailDialog = document.querySelector('#admin-detail-dialog');
 const reasonDialog = document.querySelector('#admin-reason-dialog');
@@ -49,18 +52,22 @@ async function adminRequest(url, options = {}) {
     },
     ...options
   });
+
   const text = await response.text();
   let result;
+
   try {
     result = JSON.parse(text);
   } catch {
     throw new Error(`The server returned an invalid response (HTTP ${response.status}).`);
   }
+
   if (!response.ok) {
     const error = new Error(result.details?.[0]?.message || result.error || 'The request could not be completed.');
     error.status = response.status;
     throw error;
   }
+
   return result;
 }
 
@@ -69,7 +76,9 @@ function handleAdminError(error, section = currentSection) {
     window.location.replace('/admin-dashboard.html');
     return;
   }
+
   console.error('Admin dashboard request failed:', error);
+
   if (section === 'overview') {
     const message = document.querySelector('#overview-error');
     message.textContent = error.message || 'Could not load the dashboard overview.';
@@ -81,6 +90,7 @@ function handleAdminError(error, section = currentSection) {
       message.hidden = false;
     }
   }
+
   setToast(error.message || 'The request could not be completed.', true);
 }
 
@@ -164,26 +174,31 @@ function renderCustomers(rows) {
   const state = sectionState.customers;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((customer) => {
     state.records.set(String(customer.customerId), customer);
     const row = document.createElement('tr');
     const nameCell = element('td');
     nameCell.append(element('strong', '', customer.fullName), element('small', '', `#${customer.customerId}`));
     addCell(row, nameCell);
+
     const contact = element('td');
     contact.append(element('span', '', customer.email), element('small', '', customer.phone || 'No phone'));
     addCell(row, contact);
     addCell(row, customer.bookingCount ?? 0);
     addCell(row, statusBadge(customer.accountStatus));
     addCell(row, formatDate(customer.createdAt));
+
     const nextStatus = customer.accountStatus === 'active' ? 'blocked' : 'active';
     actionsCell(
       row,
       actionButton('Details', 'details', customer.customerId),
       actionButton(nextStatus === 'active' ? 'Activate' : 'Deactivate', 'customer-status', customer.customerId, nextStatus === 'blocked' ? 'row-action-danger' : '')
     );
+
     target.append(row);
   });
+
   updateTableState('customers', rows.length);
 }
 
@@ -192,30 +207,38 @@ function renderProviders(rows) {
   const state = sectionState.providers;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((provider) => {
     state.records.set(String(provider.providerId), provider);
     const row = document.createElement('tr');
     const identity = element('td');
     identity.append(element('strong', '', provider.businessName), element('small', '', `${provider.fullName || 'Provider'} · #${provider.providerId}`));
     addCell(row, identity);
+
     const contact = element('td');
     contact.append(element('span', '', provider.email), element('small', '', provider.phone || 'No phone'));
     addCell(row, contact);
     addCell(row, provider.serviceArea);
     addCell(row, statusBadge(provider.approvalStatus));
     addCell(row, statusBadge(provider.accountStatus));
+
     const buttons = [actionButton('Details', 'details', provider.providerId)];
+
     if (provider.approvalStatus !== 'approved') {
       buttons.push(actionButton('Approve', 'provider-approve', provider.providerId));
     }
+
     if (provider.approvalStatus === 'pending') {
       buttons.push(actionButton('Reject', 'provider-reject', provider.providerId, 'row-action-danger'));
     }
+
     const nextStatus = provider.accountStatus === 'active' ? 'blocked' : 'active';
     buttons.push(actionButton(nextStatus === 'active' ? 'Activate' : 'Block', 'provider-status', provider.providerId, nextStatus === 'blocked' ? 'row-action-danger' : ''));
+
     actionsCell(row, ...buttons);
     target.append(row);
   });
+
   updateTableState('providers', rows.length);
 }
 
@@ -224,6 +247,7 @@ function renderServices(rows) {
   const state = sectionState.services;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((service) => {
     state.records.set(String(service.id), service);
     const row = document.createElement('tr');
@@ -235,13 +259,16 @@ function renderServices(rows) {
     addCell(row, formatServicePrice(service));
     addCell(row, statusBadge(service.isAvailable ? 'active' : 'blocked'));
     addCell(row, statusBadge(service.approvalStatus));
+
     const buttons = [actionButton('Details', 'details', service.id)];
     if (service.approvalStatus !== 'approved') buttons.push(actionButton('Approve', 'service-approve', service.id));
     if (service.approvalStatus === 'pending') buttons.push(actionButton('Reject', 'service-reject', service.id, 'row-action-danger'));
     buttons.push(actionButton(service.isAvailable ? 'Deactivate' : 'Activate', 'service-status', service.id, service.isAvailable ? 'row-action-danger' : ''));
+
     actionsCell(row, ...buttons);
     target.append(row);
   });
+
   updateTableState('services', rows.length);
 }
 
@@ -250,6 +277,7 @@ function renderBookings(rows) {
   const state = sectionState.bookings;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((booking) => {
     state.records.set(String(booking.id), booking);
     const row = document.createElement('tr');
@@ -259,10 +287,12 @@ function renderBookings(rows) {
     addCell(row, booking.serviceName);
     addCell(row, `${formatAppointmentDate(booking.bookingDate)} · ${formatTime(booking.bookingTime)}`);
     addCell(row, formatMoney(booking.totalAmount));
+
     const buttons = [actionButton('Details', 'details', booking.id)];
     if (['pending', 'accepted', 'in_progress'].includes(booking.status)) {
       buttons.push(actionButton('Cancel', 'booking-cancel', booking.id, 'row-action-danger'));
     }
+
     const cell = element('td');
     cell.append(statusBadge(booking.status));
     const wrap = element('div', 'admin-row-actions');
@@ -271,6 +301,7 @@ function renderBookings(rows) {
     row.append(cell);
     target.append(row);
   });
+
   updateTableState('bookings', rows.length);
 }
 
@@ -279,6 +310,7 @@ function renderReviews(rows) {
   const state = sectionState.reviews;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((review) => {
     state.records.set(String(review.id), review);
     const row = document.createElement('tr');
@@ -292,6 +324,7 @@ function renderReviews(rows) {
     actionsCell(row, actionButton('Details', 'details', review.id), actionButton('Remove', 'review-remove', review.id, 'row-action-danger'));
     target.append(row);
   });
+
   updateTableState('reviews', rows.length);
 }
 
@@ -300,29 +333,35 @@ function renderMessages(rows) {
   const state = sectionState.messages;
   target.replaceChildren();
   state.records.clear();
+
   rows.forEach((message) => {
     state.records.set(String(message.id), message);
     const row = document.createElement('tr');
     const sender = element('td');
     sender.append(element('strong', '', message.name), element('small', '', message.email));
     addCell(row, sender);
+
     const subject = element('td');
     subject.append(element('strong', '', message.subject), element('small', 'admin-review-preview', message.message));
     addCell(row, subject);
     addCell(row, formatDate(message.createdAt));
     addCell(row, statusBadge(message.status));
+
     const statusSelect = document.createElement('select');
     statusSelect.className = 'admin-status-select';
     statusSelect.dataset.messageStatus = message.id;
+
     for (const [value, label] of [['new', 'New'], ['in_progress', 'In progress'], ['resolved', 'Resolved']]) {
       const option = element('option', '', label);
       option.value = value;
       option.selected = message.status === value;
       statusSelect.append(option);
     }
+
     actionsCell(row, actionButton('Details', 'details', message.id), statusSelect);
     target.append(row);
   });
+
   updateTableState('messages', rows.length);
 }
 
@@ -340,9 +379,11 @@ function updateTableState(name, rowCount) {
 function getFilterParams(name) {
   const form = document.querySelector(`[data-filter-form="${name}"]`);
   const params = new URLSearchParams({ page: String(sectionState[name].page), limit: '20' });
+
   for (const [key, value] of new FormData(form)) {
     if (String(value).trim()) params.set(key, String(value).trim());
   }
+
   return params;
 }
 
@@ -353,16 +394,20 @@ async function loadSection(name) {
   const error = document.querySelector(`[data-error="${name}"]`);
   loading.hidden = false;
   error.hidden = true;
+
   try {
     const result = await adminRequest(`${config.url}?${getFilterParams(name)}`);
     const pagination = result.pagination || {};
     state.total = Number(pagination.total || 0);
     state.totalPages = Math.max(1, Number(pagination.totalPages || 1));
+
     if (state.page > state.totalPages) {
       state.page = state.totalPages;
       return loadSection(name);
     }
+
     state.loaded = true;
+
     const renderers = {
       customers: renderCustomers,
       providers: renderProviders,
@@ -371,6 +416,7 @@ async function loadSection(name) {
       reviews: renderReviews,
       messages: renderMessages
     };
+
     renderers[name](Array.isArray(result[config.key]) ? result[config.key] : []);
   } catch (requestError) {
     handleAdminError(requestError, name);
@@ -382,14 +428,17 @@ async function loadSection(name) {
 function renderRecentRows(rows, type) {
   const target = document.querySelector(`#recent-${type}`);
   target.replaceChildren();
+
   if (!rows.length) {
     const row = document.createElement('tr');
-    addCell(row, 'No recent activity found.', '',);
+    addCell(row, 'No recent activity found.');
     target.append(row);
     return;
   }
+
   rows.forEach((item) => {
     const row = document.createElement('tr');
+
     if (type === 'bookings') {
       addCell(row, `#${item.id} · ${formatDate(item.createdAt)}`);
       addCell(row, item.customerName);
@@ -406,6 +455,7 @@ function renderRecentRows(rows, type) {
       addCell(row, item.category);
       addCell(row, statusBadge(item.approvalStatus));
     }
+
     target.append(row);
   });
 }
@@ -413,9 +463,11 @@ function renderRecentRows(rows, type) {
 async function loadOverview() {
   const error = document.querySelector('#overview-error');
   error.hidden = true;
+
   try {
     const result = await adminRequest('/api/admin/dashboard/stats');
     const stats = result.stats;
+
     const values = {
       'stat-customers': stats.customers?.total,
       'stat-providers': stats.providers?.total,
@@ -428,9 +480,11 @@ async function loadOverview() {
       'stat-booking-cancelled': stats.bookings?.cancelled,
       'stat-reviews': stats.reviews?.total
     };
+
     for (const [id, value] of Object.entries(values)) {
       document.getElementById(id).textContent = Number(value || 0).toLocaleString();
     }
+
     const recent = result.recentActivity || {};
     renderRecentRows(recent.recentBookings || [], 'bookings');
     renderRecentRows(recent.recentProviders || [], 'providers');
@@ -448,22 +502,26 @@ function addDetail(list, label, value) {
 
 function addHistoryTable(container, title, rows, columns) {
   container.append(element('h3', 'admin-detail-subtitle', title));
+
   if (!rows?.length) {
     container.append(element('p', 'admin-detail-empty', 'No records found.'));
     return;
   }
+
   const wrap = element('div', 'table-wrap');
   const table = document.createElement('table');
   const head = document.createElement('thead');
   const headerRow = document.createElement('tr');
   columns.forEach((column) => headerRow.append(element('th', '', column.label)));
   head.append(headerRow);
+
   const body = document.createElement('tbody');
   rows.forEach((record) => {
     const row = document.createElement('tr');
     columns.forEach((column) => addCell(row, column.value(record)));
     body.append(row);
   });
+
   table.append(head, body);
   wrap.append(table);
   container.append(wrap);
@@ -482,6 +540,7 @@ function showDetailContent(title, entries, history = []) {
 
 async function showDetails(name, id) {
   const cached = sectionState[name].records.get(String(id));
+
   if (name === 'reviews') {
     showDetailContent(`Review #${cached.id}`, [
       ['Customer', cached.customerName],
@@ -501,9 +560,12 @@ async function showDetails(name, id) {
     bookings: `/api/admin/bookings/${encodeURIComponent(id)}`,
     messages: `/api/admin/messages/${encodeURIComponent(id)}`
   };
+
   const result = await adminRequest(routeByName[name]);
+
   if (name === 'customers') {
     const customer = result.customer;
+
     showDetailContent(`Customer #${customer.customerId}`, [
       ['Name', customer.fullName], ['Email', customer.email], ['Phone', customer.phone],
       ['Account status', formatStatus(customer.accountStatus)], ['Address', customer.address],
@@ -522,6 +584,7 @@ async function showDetails(name, id) {
     }]);
   } else if (name === 'providers') {
     const provider = result.provider;
+
     showDetailContent(`Provider #${provider.providerId}`, [
       ['Name', provider.fullName], ['Email', provider.email], ['Phone', provider.phone],
       ['Business', provider.businessName], ['Experience', `${provider.experience ?? 0} years`],
@@ -564,8 +627,11 @@ async function showDetails(name, id) {
       ['Rejection reason', service.rejectionReason],
       ['Availability', service.isAvailable ? 'Active' : 'Inactive'], ['Submitted', formatDate(service.createdAt)]
     ];
+
     showDetailContent(`Service #${service.id}`, entries);
-    if (service.image && service.image.startsWith('/uploads/')) {
+
+    // Supports both old local image paths and Cloudinary HTTPS URLs.
+    if (service.image) {
       const image = element('img', 'admin-detail-image');
       image.src = service.image;
       image.alt = `${service.serviceName || 'Service'} image`;
@@ -573,6 +639,7 @@ async function showDetails(name, id) {
     }
   } else if (name === 'bookings') {
     const booking = result.booking;
+
     showDetailContent(`Booking #${booking.id}`, [
       ['Status', formatStatus(booking.status)], ['Customer', booking.customerName],
       ['Customer email', booking.customerEmail], ['Customer phone', booking.customerPhone],
@@ -585,6 +652,7 @@ async function showDetails(name, id) {
     ]);
   } else {
     const message = result.message;
+
     showDetailContent(`Contact message #${message.id}`, [
       ['Sender', message.name], ['Email', message.email], ['Subject', message.subject],
       ['Message', message.message], ['Status', formatStatus(message.status)],
@@ -625,17 +693,21 @@ function queryError(status) {
 async function runAction(button) {
   const { action, id } = button.dataset;
   const body = (value) => JSON.stringify(value);
+
   const refresh = async (name) => {
     sectionState[name].loaded = false;
     await loadSection(name);
     await loadOverview();
   };
+
   button.disabled = true;
+
   try {
     if (action === 'details') {
       await showDetails(currentSection, id);
       return;
     }
+
     if (action === 'customer-status') {
       const customer = sectionState.customers.records.get(String(id));
       const status = customer.accountStatus === 'active' ? 'blocked' : 'active';
@@ -648,16 +720,19 @@ async function runAction(button) {
       const reason = approved ? null : await requestReason('Reason for rejecting provider');
       if (!approved && reason === null) return;
       if (approved && !window.confirm('Approve this provider application?')) return;
+
       await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/${approved ? 'approve' : 'reject'}`, {
         method: 'PATCH',
         ...(reason ? { body: body({ reason }) } : {})
       });
+
       setToast(approved ? 'Provider approved.' : 'Provider rejected. Reason recorded.');
       await refresh('providers');
     } else if (action === 'provider-status') {
       const provider = sectionState.providers.records.get(String(id));
       const status = provider.accountStatus === 'active' ? 'blocked' : 'active';
       if (!window.confirm(`${status === 'blocked' ? 'Block' : 'Activate'} this provider account?`)) return;
+
       await adminRequest(`/api/admin/providers/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: body({ status }) });
       setToast(`Provider account ${status}.`);
       await refresh('providers');
@@ -666,38 +741,46 @@ async function runAction(button) {
       const reason = approved ? null : await requestReason('Reason for rejecting service');
       if (!approved && reason === null) return;
       if (approved && !window.confirm('Approve this service listing?')) return;
+
       await adminRequest(`/api/admin/services/${encodeURIComponent(id)}/${approved ? 'approve' : 'reject'}`, {
         method: 'PATCH',
         ...(reason ? { body: body({ reason }) } : {})
       });
+
       setToast(approved ? 'Service approved.' : 'Service rejected. Reason recorded.');
       await refresh('services');
     } else if (action === 'service-status') {
       const service = sectionState.services.records.get(String(id));
       const isAvailable = !service.isAvailable;
       if (!window.confirm(`${isAvailable ? 'Activate' : 'Deactivate'} this service?`)) return;
+
       await adminRequest(`/api/admin/services/${encodeURIComponent(id)}/status`, {
         method: 'PATCH',
         body: body({ isAvailable })
       });
+
       setToast(`Service ${isAvailable ? 'activated' : 'deactivated'}.`);
       await refresh('services');
     } else if (action === 'booking-cancel') {
       const reason = await requestReason('Reason for cancelling booking');
       if (reason === null) return;
+
       await adminRequest(`/api/admin/bookings/${encodeURIComponent(id)}/cancel`, {
         method: 'PATCH',
         body: body({ reason })
       });
+
       setToast('Booking cancelled. Reason recorded.');
       await refresh('bookings');
     } else if (action === 'review-remove') {
       const reason = await requestReason('Reason for removing review');
       if (reason === null) return;
+
       await adminRequest(`/api/admin/reviews/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         body: body({ reason })
       });
+
       setToast('Review removed. Reason recorded.');
       await refresh('reviews');
     }
@@ -712,11 +795,13 @@ async function updateMessageStatus(select) {
   const id = select.dataset.messageStatus;
   const previous = sectionState.messages.records.get(String(id))?.status;
   select.disabled = true;
+
   try {
     await adminRequest(`/api/admin/messages/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status: select.value })
     });
+
     setToast('Message status updated.');
     await loadSection('messages');
   } catch (error) {
@@ -737,32 +822,40 @@ function closeSidebar() {
 function showSection(name) {
   const target = document.querySelector(`[data-section="${name}"]`);
   if (!target) return;
+
   currentSection = name;
+
   document.querySelectorAll('.dashboard-content > .dashboard-view').forEach((section) => {
     const active = section === target;
     section.hidden = !active;
     section.classList.toggle('is-visible', active);
   });
+
   document.querySelectorAll('[data-section-target]').forEach((button) => {
     const active = button.dataset.sectionTarget === name && button.classList.contains('nav-item');
     button.classList.toggle('is-active', active);
     if (active) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
+
   document.querySelector('#topbar-section').textContent = name === 'messages'
     ? 'Contact messages'
     : `${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+
   closeSidebar();
+
   if (name !== 'overview' && !sectionState[name].loaded) loadSection(name);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function loadIdentity() {
   const result = await adminRequest('/api/auth/me');
+
   if (result.user?.role !== 'admin') {
     window.location.replace('/admin-dashboard.html');
     throw queryError(403);
   }
+
   const fullName = result.user.fullName || 'Admin';
   document.querySelector('#admin-name').textContent = fullName;
   document.querySelector('#admin-email').textContent = result.user.email || 'Administrator';
@@ -807,6 +900,7 @@ document.querySelector('#messages-rows').addEventListener('change', (event) => {
 document.querySelector('#admin-logout').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   button.disabled = true;
+
   try {
     await adminRequest('/api/auth/logout', { method: 'POST' });
     window.location.replace('/admin-dashboard.html');
@@ -822,7 +916,9 @@ menuButton.addEventListener('click', () => {
   menuButton.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
   sidebarScrim.hidden = !open;
 });
+
 sidebarScrim.addEventListener('click', closeSidebar);
+
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeSidebar();
 });
@@ -830,14 +926,17 @@ document.addEventListener('keydown', (event) => {
 reasonDialog.addEventListener('submit', (event) => {
   event.preventDefault();
   const reason = document.querySelector('#admin-action-reason').value.trim();
+
   if (reason.length < 5 || reason.length > 1000) {
     const error = document.querySelector('#admin-reason-error');
     error.textContent = 'Enter a reason between 5 and 1,000 characters.';
     error.hidden = false;
     return;
   }
+
   finishReason(reason);
 });
+
 reasonDialog.addEventListener('close', () => {
   if (reasonResolver) {
     const resolve = reasonResolver;
@@ -845,9 +944,11 @@ reasonDialog.addEventListener('close', () => {
     resolve(null);
   }
 });
+
 document.querySelectorAll('[data-close-dialog]').forEach((button) => {
   button.addEventListener('click', () => button.closest('dialog').close());
 });
+
 document.querySelector('#current-year').textContent = String(new Date().getFullYear());
 
 loadIdentity()

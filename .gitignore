@@ -6,3 +6,35 @@ backend/uploads/*
 npm-debug.log*
 .DS_Store
 Thumbs.db
+
+# Local Netlify folder
+.netlify
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs and local files
+*.log
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Netlify local files
+.netlify/
+**/.netlify/
+
+netlify-backup.toml

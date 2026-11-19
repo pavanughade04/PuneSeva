@@ -1,3 +1,4 @@
+
 const express = require('express');
 const { param, query, validationResult } = require('express-validator');
 const { asyncHandler, isActiveCondition } = require('../middleware/auth');
@@ -8,13 +9,19 @@ function validateRequest(req, res, next) {
 
   return res.status(400).json({
     error: 'Please check the provided filters.',
-    details: errors.array({ onlyFirstError: true }).map(({ path, msg }) => ({ field: path, message: msg }))
+    details: errors.array({ onlyFirstError: true }).map(({ path, msg }) => ({
+      field: path,
+      message: msg
+    }))
   });
 }
 
 function createServicesRouter({ pool, schema }) {
   const router = express.Router();
-  const priceTypeExpression = schema?.services?.has('price_type') ? 's.price_type' : "'fixed'";
+
+  const priceTypeExpression = schema?.services?.has('price_type')
+    ? 's.price_type'
+    : "'fixed'";
 
   router.get('/locations', asyncHandler(async (req, res) => {
     const [rows] = await pool.execute(
@@ -29,7 +36,10 @@ function createServicesRouter({ pool, schema }) {
        ORDER BY s.location`,
       ['approved', 'approved']
     );
-    res.json({ locations: rows.map((row) => row.location) });
+
+    res.json({
+      locations: rows.map((row) => row.location)
+    });
   }));
 
   router.get('/categories', asyncHandler(async (req, res) => {
@@ -45,11 +55,17 @@ function createServicesRouter({ pool, schema }) {
        ORDER BY s.category`,
       ['approved', 'approved']
     );
-    res.json({ categories: rows.map((row) => row.category) });
+
+    res.json({
+      categories: rows.map((row) => row.category)
+    });
   }));
 
   router.get('/:serviceId', [
-    param('serviceId').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
+    param('serviceId')
+      .isInt({ min: 1 })
+      .withMessage('Service ID must be a positive integer.')
+      .toInt(),
     validateRequest
   ], asyncHandler(async (req, res) => {
     const [rows] = await pool.execute(
@@ -79,31 +95,49 @@ function createServicesRouter({ pool, schema }) {
        LIMIT 1`,
       [req.params.serviceId, 'approved', 'approved']
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'Service not found.' });
-    res.json({ service: { ...rows[0], isAvailable: Boolean(rows[0].isAvailable) } });
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Service not found.' });
+    }
+
+    res.json({
+      service: {
+        ...rows[0],
+        isAvailable: Boolean(rows[0].isAvailable)
+      }
+    });
   }));
 
   router.get('/', [
     query('search')
       .optional()
       .trim()
-      .isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
+      .isLength({ max: 100 })
+      .withMessage('Search text cannot exceed 100 characters.'),
+
     query('category')
       .optional()
       .trim()
-      .isLength({ min: 1, max: 100 }).withMessage('Category must be between 1 and 100 characters.'),
+      .isLength({ min: 1, max: 100 })
+      .withMessage('Category must be between 1 and 100 characters.'),
+
     query('location')
       .optional()
       .trim()
-      .isLength({ min: 1, max: 160 }).withMessage('Location must be between 1 and 160 characters.'),
+      .isLength({ min: 1, max: 160 })
+      .withMessage('Location must be between 1 and 160 characters.'),
+
     query('sort')
       .optional()
       .isIn(['newest', 'price_asc', 'price_desc'])
       .withMessage('Choose newest, price_asc, or price_desc sorting.'),
+
     query('limit')
       .optional()
-      .isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50.')
+      .isInt({ min: 1, max: 50 })
+      .withMessage('Limit must be between 1 and 50.')
       .toInt(),
+
     validateRequest
   ], asyncHandler(async (req, res) => {
     const conditions = [
@@ -112,20 +146,34 @@ function createServicesRouter({ pool, schema }) {
       'p.approval_status = ?',
       isActiveCondition(schema, 'provider')
     ];
+
     const values = ['approved', 'approved'];
 
     if (req.query.category) {
       conditions.push('s.category = ?');
       values.push(req.query.category);
     }
+
     if (req.query.location) {
       conditions.push('s.location LIKE ?');
       values.push(`%${req.query.location}%`);
     }
+
     if (req.query.search) {
-      conditions.push('(s.service_name LIKE ? OR s.category LIKE ? OR s.description LIKE ? OR s.location LIKE ? OR provider.full_name LIKE ? OR p.business_name LIKE ?)');
+      conditions.push(
+        '(s.service_name LIKE ? OR s.category LIKE ? OR s.description LIKE ? OR s.location LIKE ? OR provider.full_name LIKE ? OR p.business_name LIKE ?)'
+      );
+
       const searchTerm = `%${req.query.search}%`;
-      values.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+
+      values.push(
+        searchTerm,
+        searchTerm,
+        searchTerm,
+        searchTerm,
+        searchTerm,
+        searchTerm
+      );
     }
 
     const orderBy = {
@@ -133,7 +181,13 @@ function createServicesRouter({ pool, schema }) {
       price_asc: 's.price ASC, s.id ASC',
       price_desc: 's.price DESC, s.id DESC'
     }[req.query.sort || 'newest'];
-    values.push(req.query.limit || 24);
+
+    // LIMIT is converted to a validated integer.
+    // It is inserted into SQL only after validation.
+    const limit = req.query.limit === undefined
+      ? 24
+      : Number(req.query.limit);
+
     const [rows] = await pool.execute(
       `SELECT
          s.id,
@@ -155,12 +209,15 @@ function createServicesRouter({ pool, schema }) {
        JOIN users AS provider ON provider.id = p.user_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY ${orderBy}
-       LIMIT ?`,
+       LIMIT ${limit}`,
       values
     );
 
     res.json({
-      services: rows.map((service) => ({ ...service, isAvailable: Boolean(service.isAvailable) }))
+      services: rows.map((service) => ({
+        ...service,
+        isAvailable: Boolean(service.isAvailable)
+      }))
     });
   }));
 
