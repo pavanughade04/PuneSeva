@@ -159,8 +159,77 @@
     <dialog class="booking-dialog" id="booking-dialog" aria-labelledby="booking-dialog-title">
       <div class="dialog-heading"><div><p class="eyebrow">BOOKING DETAILS</p><h2 id="booking-dialog-title">Booking</h2></div><button class="icon-button" type="button" data-dialog-close aria-label="Close booking details">×</button></div>
       <dl class="dialog-details" id="booking-dialog-details"></dl>
-      <div class="dialog-actions"><button class="button button-outline" type="button" data-dialog-close>Close</button><button class="button button-danger" type="button" id="dialog-cancel-booking" hidden>Cancel booking</button></div>
-    </dialog>
+      <div class="dialog-actions">
+  <button
+    class="button button-primary"
+    type="button"
+    id="dialog-review-booking"
+    hidden
+  >
+    Write a Review
+  </button>
+
+  <button
+    class="button button-outline"
+    type="button"
+    data-dialog-close
+  >
+    Close
+  </button>
+
+  <button
+    class="button button-danger"
+    type="button"
+    id="dialog-cancel-booking"
+    hidden
+  >
+    Cancel booking
+  </button>
+</div>
+</dialog>
+<dialog class="booking-dialog" id="review-dialog" aria-labelledby="review-dialog-title">
+  <div class="dialog-heading">
+    <div>
+      <p class="eyebrow">CUSTOMER FEEDBACK</p>
+      <h2 id="review-dialog-title">Write a Review</h2>
+    </div>
+    <button class="icon-button" type="button" data-review-close aria-label="Close review form">×</button>
+  </div>
+
+  <form id="customer-review-form">
+    <input type="hidden" id="review-booking-id" name="bookingId">
+
+    <label for="review-rating">Your Rating</label>
+    <select id="review-rating" name="rating" required>
+      <option value="">Select rating</option>
+      <option value="5">★★★★★ - Excellent</option>
+      <option value="4">★★★★ - Very Good</option>
+      <option value="3">★★★ - Good</option>
+      <option value="2">★★ - Fair</option>
+      <option value="1">★ - Poor</option>
+    </select>
+
+    <label for="review-comment">Your Comment (optional)</label>
+    <textarea
+      id="review-comment"
+      name="comment"
+      maxlength="2000"
+      rows="4"
+      placeholder="Share your experience..."
+    ></textarea>
+
+    <p id="review-form-message" role="status" aria-live="polite"></p>
+
+    <div class="dialog-actions">
+      <button class="button button-outline" type="button" data-review-close>
+        Cancel
+      </button>
+      <button class="button button-primary" type="submit">
+        Submit Review
+      </button>
+    </div>
+  </form>
+</dialog>
     <div class="dashboard-toast" id="dashboard-toast" role="status" aria-live="polite"></div>
   </body>
 </html>

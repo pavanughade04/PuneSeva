@@ -30,3 +30,7 @@ Thumbs.db
 # Dependencies
 node_modules/
 **/node_modules/
+
+# Local backup and test output
+*.backup
+test-output.txt

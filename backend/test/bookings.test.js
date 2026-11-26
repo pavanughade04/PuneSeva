@@ -470,10 +470,22 @@ test(
       query: async (sql, values = []) => {
         calls.push({ sql, values });
 
-        return {
-          rows: [{ id: 12, status: 'pending' }],
-          rowCount: 1
-        };
+        if (sql.includes('AS "hasReview"')) {
+  return {
+    rows: [{
+      id: 12,
+      status: 'completed',
+      hasReview: false,
+      disputeStatus: null
+    }],
+    rowCount: 1
+  };
+}
+
+return {
+  rows: [{ id: 12, status: 'pending' }],
+  rowCount: 1
+};
       }
     };
 
@@ -504,6 +516,14 @@ test(
     response = await fetch(
       `${server.baseUrl}/api/customer/bookings/12`
     );
+
+    const details = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(details.booking.id, 12);
+    assert.equal(details.booking.hasReview, false);
+    assert.equal(details.booking.disputeStatus, null);
+    assert.equal(details.booking.canReview, true);
 
     assert.equal(response.status, 200);
 

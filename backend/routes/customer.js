@@ -340,7 +340,18 @@ function createCustomerRouter({ pool, schema }) {
          b.rejection_reason AS "rejectionReason",
          b.status,
          b.total_amount AS "totalAmount",
-         b.created_at AS "createdAt"
+                 b.created_at AS "createdAt",
+         EXISTS (
+           SELECT 1
+           FROM reviews AS r
+           WHERE r.booking_id = b.id
+         ) AS "hasReview",
+         (
+           SELECT sd.status
+           FROM service_disputes AS sd
+           WHERE sd.booking_id = b.id
+           LIMIT 1
+         ) AS "disputeStatus"
        FROM bookings AS b
        JOIN services AS s ON s.id = b.service_id
        JOIN users AS provider ON provider.id = b.provider_id
@@ -353,7 +364,17 @@ function createCustomerRouter({ pool, schema }) {
       return res.status(404).json({ error: 'Booking not found.' });
     }
 
-    res.json({ booking: result.rows[0] });
+    const booking = result.rows[0];
+
+const hasActiveDispute = ['pending', 'under_review']
+  .includes(booking.disputeStatus);
+
+booking.canReview =
+  booking.status === 'completed' &&
+  !booking.hasReview &&
+  !hasActiveDispute;
+
+res.json({ booking });
   }));
 
   router.put('/bookings/:bookingId/cancel', [
@@ -392,6 +413,266 @@ function createCustomerRouter({ pool, schema }) {
       error: 'This booking can no longer be cancelled.'
     });
   }));
+
+
+  router.post('/bookings/:bookingId/dispute', [
+    param('bookingId')
+      .isInt({ min: 1 })
+      .withMessage('Booking ID must be a positive integer.')
+      .toInt(),
+
+    body('reason')
+      .isString()
+      .withMessage('Dispute reason is required.')
+      .bail()
+      .trim()
+      .isLength({ min: 1, max: 100 })
+      .withMessage('Reason must be between 1 and 100 characters.'),
+
+    body('description')
+      .isString()
+      .withMessage('Dispute description is required.')
+      .bail()
+      .trim()
+      .isLength({ min: 1, max: 2000 })
+      .withMessage('Description must be between 1 and 2,000 characters.'),
+
+    validateRequest
+  ], asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let transactionStarted = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      const bookingResult = await client.query(
+        `SELECT
+           id,
+           customer_id,
+           provider_id,
+           status,
+           status_updated_at,
+           (
+             status_updated_at >= LOCALTIMESTAMP - INTERVAL '24 hours'
+           ) AS "disputeWindowOpen"
+         FROM bookings
+         WHERE id = $1 AND customer_id = $2
+         FOR UPDATE`,
+        [req.params.bookingId, req.user.id]
+      );
+
+      if (bookingResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+
+        return res.status(404).json({
+          error: 'Booking not found.'
+        });
+      }
+
+      const booking = bookingResult.rows[0];
+
+      if (booking.status !== 'completed') {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+
+        return res.status(409).json({
+          error: 'A dispute can only be raised for a completed booking.'
+        });
+      }
+
+      if (!booking.disputeWindowOpen) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+
+        return res.status(409).json({
+          error: 'The 24-hour dispute submission period has expired.'
+        });
+      }
+
+      const disputeResult = await client.query(
+        `INSERT INTO service_disputes (
+           booking_id,
+           customer_id,
+           provider_id,
+           reason,
+           description
+         )
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, status, created_at AS "createdAt"`,
+        [
+          booking.id,
+          booking.customer_id,
+          booking.provider_id,
+          req.body.reason,
+          req.body.description
+        ]
+      );
+
+      const dispute = disputeResult.rows[0];
+
+      await client.query(
+        `INSERT INTO dispute_status_history (
+           dispute_id,
+           previous_status,
+           new_status,
+           actor_id,
+           actor_role,
+           notes
+         )
+         VALUES ($1, NULL, 'pending', $2, 'customer', NULL)`,
+        [dispute.id, req.user.id]
+      );
+
+      await client.query('COMMIT');
+      transactionStarted = false;
+
+      return res.status(201).json({
+        message: 'Your dispute has been submitted successfully.',
+        dispute
+      });
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query('ROLLBACK');
+      }
+
+      if (
+        error.code === '23505'
+        && error.constraint === 'service_disputes_booking_unique'
+      ) {
+        return res.status(409).json({
+          error: 'A dispute has already been submitted for this booking.'
+        });
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+  }));
+
+
+  router.post('/reviews', [
+    body('bookingId')
+      .isInt({ min: 1 })
+      .withMessage('A valid booking ID is required.')
+      .toInt(),
+
+    body('rating')
+      .isInt({ min: 1, max: 5 })
+      .withMessage('Rating must be between 1 and 5.')
+      .toInt(),
+
+    body('comment')
+      .optional({ nullable: true })
+      .isString()
+      .bail()
+      .trim()
+      .isLength({ max: 2000 })
+      .withMessage('Comment cannot exceed 2000 characters.'),
+
+    validateRequest
+  ], asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+    let transactionStarted = false;
+
+    try {
+      await client.query('BEGIN');
+      transactionStarted = true;
+
+      // Lock the booking so review and dispute creation
+      // cannot pass their eligibility checks concurrently.
+      const bookingResult = await client.query(
+        `SELECT id, customer_id, provider_id, status
+         FROM bookings
+         WHERE id = $1 AND customer_id = $2
+         FOR UPDATE`,
+        [req.body.bookingId, req.user.id]
+      );
+
+      if (bookingResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+        return res.status(404).json({
+          error: 'Booking not found.'
+        });
+      }
+
+      const booking = bookingResult.rows[0];
+
+      if (booking.status !== 'completed') {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+        return res.status(409).json({
+          error: 'You can review only completed bookings.'
+        });
+      }
+
+      const disputeResult = await client.query(
+        `SELECT id
+         FROM service_disputes
+         WHERE booking_id = $1
+           AND status IN ('pending', 'under_review')
+         LIMIT 1`,
+        [booking.id]
+      );
+
+      if (disputeResult.rows.length > 0) {
+        await client.query('ROLLBACK');
+        transactionStarted = false;
+        return res.status(409).json({
+          error: 'You cannot submit a review while your dispute is under review.'
+        });
+      }
+
+      const reviewResult = await client.query(
+        `INSERT INTO reviews
+           (booking_id, customer_id, provider_id, rating, comment)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING
+           id,
+           booking_id AS "bookingId",
+           rating,
+           comment,
+           created_at AS "createdAt"`,
+        [
+          booking.id,
+          booking.customer_id,
+          booking.provider_id,
+          req.body.rating,
+          req.body.comment || null
+        ]
+      );
+
+      await client.query('COMMIT');
+      transactionStarted = false;
+
+      return res.status(201).json({
+        message: 'Your review has been submitted successfully.',
+        review: reviewResult.rows[0]
+      });
+    } catch (error) {
+      if (transactionStarted) {
+        await client.query('ROLLBACK');
+      }
+
+      if (
+        error.code === '23505' &&
+        error.constraint === 'reviews_booking_id_key'
+      ) {
+        return res.status(409).json({
+          error: 'You have already reviewed this booking.'
+        });
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+  }));
+
+
 
   router.get('/reviews', asyncHandler(async (req, res) => {
     const result = await pool.query(

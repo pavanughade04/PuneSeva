@@ -282,7 +282,56 @@ async function showBookingDetails(bookingId) {
   const cancelButton = document.querySelector('#dialog-cancel-booking');
   cancelButton.hidden = !['pending', 'accepted'].includes(booking.status);
   cancelButton.dataset.bookingId = booking.id;
+
+  const reviewButton = document.querySelector('#dialog-review-booking');
+  reviewButton.hidden = booking.canReview !== true;
+  reviewButton.dataset.bookingId = booking.id;
+
   if (!bookingDialog.open) bookingDialog.showModal();
+}
+
+function openReviewForm(bookingId) {
+  document.querySelector('#review-booking-id').value = bookingId;
+  document.querySelector('#review-rating').value = '';
+  document.querySelector('#review-comment').value = '';
+  document.querySelector('#review-form-message').textContent = '';
+
+  if (bookingDialog.open) bookingDialog.close();
+
+  document.querySelector('#review-dialog').showModal();
+}
+
+async function submitCustomerReview(event) {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('[type="submit"]');
+  const message = document.querySelector('#review-form-message');
+
+  message.textContent = '';
+  submitButton.disabled = true;
+
+  try {
+    const result = await requestJson('/api/customer/reviews', {
+      method: 'POST',
+      body: JSON.stringify({
+        bookingId: Number(form.elements.bookingId.value),
+        rating: Number(form.elements.rating.value),
+        comment: form.elements.comment.value.trim()
+      })
+    });
+
+    document.querySelector('#review-dialog').close();
+    showToast(result.message || 'Review submitted successfully.');
+
+    await loadReviews();
+    await showBookingDetails(form.elements.bookingId.value);
+  } catch (error) {
+    message.textContent = error.message || 'Could not submit your review.';
+    handleRequestError(error);
+  } finally {
+    submitButton.disabled = false;
+  }
 }
 
 async function cancelBooking(bookingId, button) {
@@ -441,6 +490,21 @@ document.querySelectorAll('[data-dialog-close]').forEach((button) => {
 
 document.querySelector('#dialog-cancel-booking')?.addEventListener('click', (event) => {
   cancelBooking(event.currentTarget.dataset.bookingId, event.currentTarget);
+});
+
+document.querySelector('#dialog-review-booking')?.addEventListener('click', (event) => {
+  openReviewForm(event.currentTarget.dataset.bookingId);
+});
+
+document.querySelector('#customer-review-form')?.addEventListener(
+  'submit',
+  submitCustomerReview
+);
+
+document.querySelectorAll('[data-review-close]').forEach((button) => {
+  button.addEventListener('click', () => {
+    document.querySelector('#review-dialog').close();
+  });
 });
 
 document.querySelector('#current-year').textContent = String(new Date().getFullYear());
