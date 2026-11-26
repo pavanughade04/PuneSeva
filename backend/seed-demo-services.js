@@ -222,124 +222,205 @@ const additionalCategoryTemplates = {
   ]
 };
 
+
 function templatesForCategory(category, addCategories) {
   const normalizedCategory = category.trim().toLocaleLowerCase();
+
   if (addCategories) {
     const templates = additionalCategoryTemplates[normalizedCategory];
-    if (!templates) throw new Error(`No additional demo templates are defined for "${category}".`);
-    return templates.map(([title, details, price, priceType]) => ({ title, details, price, priceType }));
+
+    if (!templates) {
+      throw new Error(`No additional demo templates are defined for "${category}".`);
+    }
+
+    return templates.map(([title, details, price, priceType]) => ({
+      title,
+      details,
+      price,
+      priceType
+    }));
   }
-  return normalizedCategory === 'electrician' ? electricianServices : genericServiceTemplates;
+
+  return normalizedCategory === 'electrician'
+    ? electricianServices
+    : genericServiceTemplates;
 }
 
-async function getTableColumns(connection, tableName) {
-  const [rows] = await connection.execute(
-    `SELECT COLUMN_NAME, COLUMN_TYPE
-     FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+async function getTableColumns(client, tableName) {
+  const result = await client.query(
+    `SELECT column_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = $1`,
     [tableName]
   );
-  return new Map(rows.map((row) => [row.COLUMN_NAME, row.COLUMN_TYPE]));
+
+  return new Map(
+    result.rows.map((row) => [row.column_name, row.data_type])
+  );
 }
 
 function assertRequiredColumns(columns) {
-  const required = ['id', 'provider_id', 'service_name', 'category', 'price', 'location'];
+  const required = [
+    'id',
+    'provider_id',
+    'service_name',
+    'category',
+    'price',
+    'location'
+  ];
+
   const missing = required.filter((column) => !columns.has(column));
+
   if (missing.length > 0) {
-    throw new Error(`The services table is missing required columns: ${missing.join(', ')}.`);
+    throw new Error(
+      `The services table is missing required columns: ${missing.join(', ')}.`
+    );
   }
 }
 
 function getAllowedEnumValues(columnType) {
-  if (!columnType || !columnType.startsWith('enum(')) return [];
-  return [...columnType.matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((match) => match[1]);
-}
+  if (!columnType) return [];
 
-async function getEligibleProviders(connection, providerColumns, userColumns) {
-  if (!providerColumns.has('user_id') || !providerColumns.has('approval_status') || !userColumns.has('role')) {
-    throw new Error('Cannot safely identify approved providers in this database schema.');
+  // PostgreSQL schema uses a CHECK constraint for price_type.
+  if (columnType === 'character varying' || columnType === 'text') {
+    return ['fixed', 'hourly', 'starting_from'];
   }
 
-  const conditions = ["u.role = 'provider'", "p.approval_status = 'approved'"];
-  if (userColumns.has('account_status')) conditions.push("u.account_status = 'active'");
-  else if (userColumns.has('is_active')) conditions.push('u.is_active = 1');
+  return [];
+}
 
-  const [rows] = await connection.execute(
+async function getEligibleProviders(client, providerColumns, userColumns) {
+    if (
+    !providerColumns.has('user_id') ||
+    !providerColumns.has('approval_status') ||
+    !userColumns.has('role') ||
+    !userColumns.has('is_active')
+  ) {
+    throw new Error(
+      'Cannot safely identify approved providers in this database schema.'
+    );
+  }
+
+  const conditions = [
+    "u.role = 'provider'",
+    "p.approval_status = 'approved'"
+  ];
+
+    conditions.push('u.is_active = TRUE');
+
+  const result = await client.query(
     `SELECT p.user_id AS provider_id
      FROM provider_profiles AS p
      JOIN users AS u ON u.id = p.user_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY p.user_id`
   );
-  return rows.map((row) => Number(row.provider_id));
+
+  return result.rows.map((row) => Number(row.provider_id));
 }
 
-async function buildPlan(connection, serviceColumns, providers, addCategories = false) {
-  const [categoryRows] = await connection.execute(
+async function buildPlan(client, serviceColumns, providers, addCategories = false) {
+  const categoryResult = await client.query(
     `SELECT category, COUNT(*) AS service_count
      FROM services
-     WHERE category IS NOT NULL AND TRIM(category) <> ''
+     WHERE category IS NOT NULL
+       AND TRIM(category) <> ''
      GROUP BY category
      ORDER BY category`
   );
+
+  const categoryRows = categoryResult.rows;
+
   const currentCounts = new Map(
-    categoryRows.map((row) => [String(row.category).trim().toLocaleLowerCase(), Number(row.service_count)])
+    categoryRows.map((row) => [
+      String(row.category).trim().toLocaleLowerCase(),
+      Number(row.service_count)
+    ])
   );
+
   const categories = addCategories
     ? ADDITIONAL_CATEGORIES.map((category) => ({
-      category,
-      currentCount: currentCounts.get(category.toLocaleLowerCase()) || 0
-    }))
+        category,
+        currentCount: currentCounts.get(category.toLocaleLowerCase()) || 0
+      }))
     : categoryRows.map((row) => ({
-      category: row.category,
-      currentCount: Number(row.service_count)
-    }));
+        category: row.category,
+        currentCount: Number(row.service_count)
+      }));
 
   const overTarget = addCategories
     ? []
     : categories.filter(({ currentCount }) => currentCount > TARGET_COUNT);
+
   if (overTarget.length > 0) {
     throw new Error(
       `Cannot safely reach exactly ${TARGET_COUNT} services without deleting existing records: ` +
-      overTarget.map(({ category, currentCount }) => `${category} (${currentCount})`).join(', ')
+      overTarget
+        .map(({ category, currentCount }) => `${category} (${currentCount})`)
+        .join(', ')
     );
   }
+
   if (categories.length === 0) {
     throw new Error('No existing service categories were found in services.category.');
   }
+
   if (providers.length === 0) {
-    throw new Error('No active, approved provider accounts are available for the demo services.');
+    throw new Error(
+      'No active, approved provider accounts are available for the demo services.'
+    );
   }
 
-  const canApprove = serviceColumns.has('approval_status')
-    && providers.length > 0;
+  const canApprove = serviceColumns.has('approval_status');
   const approvalStatus = canApprove ? 'approved' : 'pending';
-  const isAvailable = canApprove ? 1 : 0;
+  const isAvailable = canApprove;
   const priceTypeValues = getAllowedEnumValues(serviceColumns.get('price_type'));
+
   const plan = [];
   const summary = [];
 
   for (const { category, currentCount } of categories) {
-    const [existingRows] = await connection.execute(
-      'SELECT service_name FROM services WHERE category = ?',
+    const existingResult = await client.query(
+      'SELECT service_name FROM services WHERE category = $1',
       [category]
     );
-    const existingNames = new Set(existingRows.map((row) => String(row.service_name).toLocaleLowerCase()));
+
+    const existingNames = new Set(
+      existingResult.rows.map((row) =>
+        String(row.service_name).toLocaleLowerCase()
+      )
+    );
+
     const templates = templatesForCategory(category, addCategories);
+
     const needed = addCategories
-      ? templates.filter((template) => !existingNames.has(
-        `${DEMO_PREFIX} ${category} - ${template.title}`.toLocaleLowerCase()
-      )).length
+      ? templates.filter((template) =>
+          !existingNames.has(
+            `${DEMO_PREFIX} ${category} - ${template.title}`.toLocaleLowerCase()
+          )
+        ).length
       : TARGET_COUNT - currentCount;
+
     const categoryPlan = [];
 
-    for (let index = 0; index < templates.length && categoryPlan.length < needed; index += 1) {
+    for (
+      let index = 0;
+      index < templates.length && categoryPlan.length < needed;
+      index += 1
+    ) {
       const template = templates[index];
       const serviceName = `${DEMO_PREFIX} ${category} - ${template.title}`;
+
       if (existingNames.has(serviceName.toLocaleLowerCase())) continue;
 
-      if (serviceColumns.has('price_type') && !priceTypeValues.includes(template.priceType)) {
-        throw new Error(`The services.price_type column does not support "${template.priceType}".`);
+      if (
+        serviceColumns.has('price_type') &&
+        !priceTypeValues.includes(template.priceType)
+      ) {
+        throw new Error(
+          `The services.price_type column does not support "${template.priceType}".`
+        );
       }
 
       const record = {
@@ -349,22 +430,29 @@ async function buildPlan(connection, serviceColumns, providers, addCategories = 
         description: `[DEMO DATA] ${template.details}`,
         location: LOCATION,
         price: template.price,
-        priceType: serviceColumns.has('price_type') ? template.priceType : 'fixed',
+        priceType: serviceColumns.has('price_type')
+          ? template.priceType
+          : 'fixed',
         isAvailable,
         approvalStatus
       };
-      if (serviceColumns.has('service_name') && serviceName.length > 150) {
+
+      if (serviceName.length > 150) {
         throw new Error(`Generated service name is too long for category "${category}".`);
       }
-      if (serviceColumns.has('description') && record.description.length > 6000) {
+
+      if (record.description.length > 6000) {
         throw new Error(`Generated description is too long for category "${category}".`);
       }
+
       categoryPlan.push(record);
       existingNames.add(serviceName.toLocaleLowerCase());
     }
 
     if (categoryPlan.length !== needed) {
-      throw new Error(`Not enough unique demo templates are available for category "${category}".`);
+      throw new Error(
+        `Not enough unique demo templates are available for category "${category}".`
+      );
     }
 
     summary.push({
@@ -373,6 +461,7 @@ async function buildPlan(connection, serviceColumns, providers, addCategories = 
       toAdd: categoryPlan.length,
       finalCount: currentCount + categoryPlan.length
     });
+
     plan.push(...categoryPlan);
   }
 
@@ -380,49 +469,74 @@ async function buildPlan(connection, serviceColumns, providers, addCategories = 
 }
 
 function printPreview(plan, addCategories, apply) {
-  console.log(apply
-    ? 'Mode: APPLY (database changes require the confirmation phrase below)'
-    : 'Mode: DRY RUN (no database changes)');
+  console.log(
+    apply
+      ? 'Mode: APPLY (database changes require the confirmation phrase below)'
+      : 'Mode: DRY RUN (no database changes)'
+  );
+
   if (addCategories) {
-    console.log(`Plan: add up to ${ADDITIONAL_SERVICES_PER_CATEGORY} new demo services to each of the ${ADDITIONAL_CATEGORIES.length} configured categories.`);
+    console.log(
+      `Plan: add up to ${ADDITIONAL_SERVICES_PER_CATEGORY} new demo services to each of the ${ADDITIONAL_CATEGORIES.length} configured categories.`
+    );
   } else {
     console.log(`Plan: fill each existing category to ${TARGET_COUNT} services.`);
   }
+
   console.log(`Categories found: ${plan.categories.length}`);
   console.table(plan.categories);
+
   console.log('Proposed service records:');
-  console.table(plan.records.map((record) => ({
-    category: record.category,
-    name: record.serviceName,
-    description: record.description,
-    providerId: record.providerId,
-    priceINR: record.price,
-    priceType: record.priceType,
-    location: record.location,
-    approvalStatus: record.approvalStatus,
-    isAvailable: record.isAvailable
-  })));
+
+  console.table(
+    plan.records.map((record) => ({
+      category: record.category,
+      name: record.serviceName,
+      description: record.description,
+      providerId: record.providerId,
+      priceINR: record.price,
+      priceType: record.priceType,
+      location: record.location,
+      approvalStatus: record.approvalStatus,
+      isAvailable: record.isAvailable
+    }))
+  );
 }
 
 async function confirmApply(recordCount) {
   const rl = readline.createInterface({ input: stdin, output: stdout });
+
   try {
-    const answer = await rl.question(`Type INSERT ${recordCount} DEMO SERVICES to continue: `);
+    const answer = await rl.question(
+      `Type INSERT ${recordCount} DEMO SERVICES to continue: `
+    );
+
     return answer.trim() === `INSERT ${recordCount} DEMO SERVICES`;
   } finally {
     rl.close();
   }
 }
 
-async function insertRecords(connection, serviceColumns, records) {
+async function insertRecords(client, serviceColumns, records) {
   const optionalColumns = [
     'description',
     'price_type',
     'is_available',
     'approval_status'
   ].filter((column) => serviceColumns.has(column));
-  const columns = ['provider_id', 'service_name', 'category', ...optionalColumns, 'location', 'price'];
-  const placeholders = columns.map(() => '?').join(', ');
+
+  const columns = [
+    'provider_id',
+    'service_name',
+    'category',
+    ...optionalColumns,
+    'location',
+    'price'
+  ];
+
+  const placeholders = columns
+    .map((_, index) => `$${index + 1}`)
+    .join(', ');
 
   for (const record of records) {
     const valuesByColumn = {
@@ -436,9 +550,12 @@ async function insertRecords(connection, serviceColumns, records) {
       location: record.location,
       price: record.price
     };
+
     const values = columns.map((column) => valuesByColumn[column]);
-    await connection.execute(
-      `INSERT INTO services (${columns.join(', ')}) VALUES (${placeholders})`,
+
+    await client.query(
+      `INSERT INTO services (${columns.join(', ')})
+       VALUES (${placeholders})`,
       values
     );
   }
@@ -448,84 +565,141 @@ async function main() {
   const args = process.argv.slice(2);
   const apply = args.includes('--apply');
   const addCategories = args.includes('--add-categories');
+
   if (args.includes('--apply') && args.includes('--dry-run')) {
     throw new Error('Choose either --dry-run or --apply, not both.');
   }
-  if (args.some((argument) => !['--apply', '--dry-run', '--add-categories'].includes(argument))) {
-    throw new Error('Usage: node seed-demo-services.js [--add-categories] [--dry-run|--apply].');
+
+  if (
+    args.some(
+      (argument) =>
+        !['--apply', '--dry-run', '--add-categories'].includes(argument)
+    )
+  ) {
+    throw new Error(
+      'Usage: node seed-demo-services.js [--add-categories] [--dry-run|--apply].'
+    );
   }
 
-  const connection = await pool.getConnection();
+  const client = await pool.connect();
   let lockAcquired = false;
   let transactionStarted = false;
+
   try {
-    const serviceColumns = await getTableColumns(connection, 'services');
-    const providerColumns = await getTableColumns(connection, 'provider_profiles');
-    const userColumns = await getTableColumns(connection, 'users');
+    const serviceColumns = await getTableColumns(client, 'services');
+    const providerColumns = await getTableColumns(client, 'provider_profiles');
+    const userColumns = await getTableColumns(client, 'users');
+
     assertRequiredColumns(serviceColumns);
 
     if (apply) {
-      const [lockRows] = await connection.execute('SELECT GET_LOCK(?, 10) AS acquired', [SEED_LOCK_NAME]);
-      lockAcquired = Number(lockRows[0].acquired) === 1;
-      if (!lockAcquired) throw new Error('Could not acquire the demo-service seed lock. Try again.');
-      await connection.beginTransaction();
+      const lockResult = await client.query(
+        'SELECT pg_try_advisory_lock($1, $2) AS acquired',
+        [20261124, 2]
+      );
+
+      lockAcquired = lockResult.rows[0].acquired;
+
+      if (!lockAcquired) {
+        throw new Error('Could not acquire the demo-service seed lock. Try again.');
+      }
+
+      await client.query('BEGIN');
       transactionStarted = true;
     }
 
-    const providers = await getEligibleProviders(connection, providerColumns, userColumns);
-    const plan = await buildPlan(connection, serviceColumns, providers, addCategories);
+    const providers = await getEligibleProviders(
+      client,
+      providerColumns,
+      userColumns
+    );
+
+    const plan = await buildPlan(
+      client,
+      serviceColumns,
+      providers,
+      addCategories
+    );
+
     printPreview(plan, addCategories, apply);
 
     if (!apply) return;
+
     if (plan.records.length === 0) {
       console.log('No new demo services are needed. Nothing to insert.');
-      await connection.rollback();
+      await client.query('ROLLBACK');
       transactionStarted = false;
       return;
     }
 
     if (!(await confirmApply(plan.records.length))) {
       console.log('Confirmation did not match. No services were inserted.');
-      await connection.rollback();
+      await client.query('ROLLBACK');
       transactionStarted = false;
       return;
     }
 
-    await insertRecords(connection, serviceColumns, plan.records);
-    const [finalRows] = await connection.execute(
+    await insertRecords(client, serviceColumns, plan.records);
+
+    const finalResult = await client.query(
       `SELECT category, COUNT(*) AS service_count
        FROM services
-       WHERE category IS NOT NULL AND TRIM(category) <> ''
+       WHERE category IS NOT NULL
+         AND TRIM(category) <> ''
        GROUP BY category
        ORDER BY category`
     );
-    const finalCounts = new Map(finalRows.map((row) => [row.category, Number(row.service_count)]));
+
+    const finalCounts = new Map(
+      finalResult.rows.map((row) => [
+        row.category,
+        Number(row.service_count)
+      ])
+    );
+
     const invalidCounts = plan.categories.filter(
       ({ category, finalCount }) => finalCounts.get(category) !== finalCount
     );
+
     if (invalidCounts.length > 0) {
-      throw new Error('Final category counts did not match the target; transaction will be rolled back.');
+      throw new Error(
+        'Final category counts did not match the target; transaction will be rolled back.'
+      );
     }
 
-    await connection.commit();
+    await client.query('COMMIT');
     transactionStarted = false;
+
     console.log('Demo services inserted and verified:');
-    console.table(plan.categories.map((row) => ({
-      category: row.category,
-      previousCount: row.previousCount,
-      added: row.toAdd,
-      finalCount: finalCounts.get(row.category)
-    })));
+
+    console.table(
+      plan.categories.map((row) => ({
+        category: row.category,
+        previousCount: row.previousCount,
+        added: row.toAdd,
+        finalCount: finalCounts.get(row.category)
+      }))
+    );
   } catch (error) {
-    if (transactionStarted) await connection.rollback();
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Demo seed rollback failed:', rollbackError.message);
+      }
+    }
+
     throw error;
   } finally {
     try {
       if (lockAcquired) {
-        await connection.execute('SELECT RELEASE_LOCK(?)', [SEED_LOCK_NAME]);
+        await client.query(
+          'SELECT pg_advisory_unlock($1, $2)',
+          [20261124, 2]
+        );
       }
     } finally {
-      connection.release();
+      client.release();
     }
   }
 }

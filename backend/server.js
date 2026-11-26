@@ -1,4 +1,8 @@
-require('dotenv').config();
+
+require('dotenv').config({
+  path: require('path').join(__dirname, '.env'),
+  override: false
+});
 
 const crypto = require('crypto');
 const path = require('path');
@@ -12,7 +16,7 @@ const { createProviderRouter } = require('./routes/provider');
 const { createAdminRouter } = require('./routes/admin');
 const { createServicesRouter } = require('./routes/services');
 const { loadAuthSchema } = require('./services/auth-schema');
-const { MySQLSessionStore } = require('./services/mysql-session-store');
+const { PostgreSQLSessionStore } = require('./services/postgres-session-store')
 const { ensureContactMessagesTable } = require('./services/contact-schema');
 const { createContactRouter } = require('./routes/contact');
 
@@ -83,7 +87,8 @@ async function startServer() {
   await checkDatabaseConnection();
   const schema = await loadAuthSchema(pool);
   await ensureContactMessagesTable(pool);
-  const sessionStore = new MySQLSessionStore(pool);
+
+  const sessionStore = new PostgreSQLSessionStore(pool);
   await sessionStore.initialize();
 
   app.use(session({
@@ -145,6 +150,7 @@ async function startServer() {
   const server = app.listen(port, () => {
     console.log(`Pune Seva server is running at http://localhost:${port}`);
   });
+
   server.on('error', (error) => {
     console.error(`Pune Seva could not listen on port ${port}:`, error.message);
     pool.end()

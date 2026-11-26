@@ -1,1472 +1,1601 @@
-const express = require('express');
-const { body, param, query, validationResult } = require('express-validator');
-const { asyncHandler } = require('../middleware/auth');
 
+const express = require('express');
+const {
+  body,
+  param,
+  validationResult
+} = require('express-validator');
+
+const asyncHandler = (handler) => (req, res, next) =>
+  Promise.resolve(handler(req, res, next)).catch(next);
+
+// Validation helper
 function validateRequest(req, res, next) {
   const errors = validationResult(req);
-  if (errors.isEmpty()) return next();
 
-  return res.status(400).json({
-    error: 'Please check the provided information.',
-    details: errors.array({ onlyFirstError: true }).map(({ path, msg }) => ({ field: path, message: msg }))
-  });
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: 'Validation failed.',
+      details: errors.array()
+    });
+  }
+
+  next();
 }
 
-function safeNumber(value, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+// Positive integer helper
+function toPositiveInt(value, fallback) {
+  const number = Number(value);
+
+  return Number.isInteger(number) && number > 0
+    ? number
+    : fallback;
 }
 
-function toPositiveInt(value, fallback = 1) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
-  return parsed;
-}
+// Pagination helper
+function pagination(req) {
+  const page = toPositiveInt(req.query.page, 1);
+  const limit = Math.min(toPositiveInt(req.query.limit, 10), 100);
 
-async function tableExists(pool, tableName) {
-  const [rows] = await pool.execute(
-    'SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1',
-    [tableName]
-  );
-  return rows.length > 0;
-}
-
-function buildPagination(page, limit, total) {
-  const safePage = Math.max(1, toPositiveInt(page, 1));
-  const safeLimit = Math.max(1, Math.min(100, toPositiveInt(limit, 20)));
-  const totalPages = Math.max(1, Math.ceil(total / safeLimit));
   return {
-    page: safePage,
-    limit: safeLimit,
-    total,
-    totalPages,
-    hasNextPage: safePage < totalPages
+    page,
+    limit,
+    offset: (page - 1) * limit
   };
 }
 
-function getUserStatusColumn(schema, alias = 'u') {
-  return schema?.users?.has('account_status') ? `${alias}.account_status` : `${alias}.is_active`;
+// Pagination response
+function paginationMeta(page, limit, total) {
+  const totalItems = Number(total) || 0;
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    page,
+    limit,
+    total: totalItems,
+    totalPages,
+    hasNextPage: page < totalPages
+  };
 }
 
-function normalizeUserStatus(schema, status) {
-  if (schema?.users?.has('account_status')) return status;
-  return status === 'active' ? 1 : 0;
-}
-
-function getUserStatusSql(schema, alias = 'u') {
-  if (schema?.users?.has('account_status')) {
-    return `${alias}.account_status`;
+// Audit log helper
+async function writeAuditLog(
+  client,
+  adminId,
+  entityType,
+  entityId,
+  action,
+  reason
+) {
+  if (!adminId) {
+    throw new Error('Admin ID is required for audit logging.');
   }
-  return `CASE WHEN ${alias}.is_active = 1 THEN 'active' ELSE 'blocked' END`;
-}
 
-function getUserStatusExpression(schema, alias = 'u', status = 'active') {
-  if (schema?.users?.has('account_status')) {
-    return `${alias}.account_status = '${status}'`;
-  }
-  return status === 'active' ? `${alias}.is_active = 1` : `${alias}.is_active = 0`;
-}
-
-async function withTransaction(pool, action) {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const result = await action(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}
-
-async function writeAuditLog(connection, adminId, entityType, entityId, action, reason = null) {
-  await connection.execute(
-    `INSERT INTO admin_audit_log (admin_id, entity_type, entity_id, action, reason)
-     VALUES (?, ?, ?, ?, ?)`,
-    [adminId, entityType, entityId, action, reason]
+  await client.query(
+    `INSERT INTO admin_audit_log
+      (admin_id, entity_type, entity_id, action, reason)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [adminId, entityType, entityId, action, reason || null]
   );
 }
 
-function createAdminRouter({ pool, schema = { users: new Set(['account_status']) } }) {
+// Transaction helper
+async function withTransaction(pool, callback) {
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const result = await callback(client);
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        error.rollbackError = rollbackError;
+      }
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function adminIdFromRequest(req) {
+  return Number(req.user?.id);
+}
+
+function createAdminRouter({ pool, schema = {} }) {
   const router = express.Router();
-  const providerExperienceColumn = `p.${schema.experienceColumn || 'experience_years'}`;
-  const providerAreaColumn = `p.${schema.areaColumn || 'service_area'}`;
-  const providerDescriptionColumn = `p.${schema.descriptionColumn || 'description'}`;
-  const providerAddressColumn = schema.providers?.has('address') === false ? 'NULL' : 'p.address';
-  const providerCityColumn = schema.providers?.has('city') === false ? 'NULL' : 'p.city';
-  const userPhoneColumn = schema.users?.has('phone') === false ? 'NULL' : 'u.phone';
-  const serviceImageColumn = schema.services?.has('image') === false ? 'NULL' : 's.image';
-  const servicePriceTypeColumn = schema.services?.has('price_type') === false ? "'fixed'" : 's.price_type';
+
+  // Authentication and admin authorization are handled
+  // by the parent application before this router is mounted.
+
+  // ==========================================
+  // DASHBOARD
+  // ==========================================
 
   router.get('/dashboard', asyncHandler(async (req, res) => {
-    const [serviceRows] = await pool.execute(
+    const result = await pool.query(
       `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(approval_status = 'pending'), 0) AS pending,
-         COALESCE(SUM(approval_status = 'approved'), 0) AS approved,
-         COALESCE(SUM(approval_status = 'rejected'), 0) AS rejected
-       FROM services`
+        (SELECT COUNT(*) FROM users WHERE role = 'customer') AS customers,
+        (SELECT COUNT(*) FROM users WHERE role = 'provider') AS providers,
+        (SELECT COUNT(*) FROM services) AS services,
+        (SELECT COUNT(*) FROM bookings) AS bookings,
+        (SELECT COUNT(*) FROM bookings WHERE status = 'pending') AS pending_bookings,
+        (SELECT COUNT(*) FROM provider_profiles WHERE approval_status = 'pending') AS pending_providers`
     );
-    const [providerRows] = await pool.execute(
+
+    res.json({ dashboard: result.rows[0] });
+  }));
+
+
+  router.get('/dashboard/stats', asyncHandler(async (req, res) => {
+    const statsResult = await pool.query(
       `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(approval_status = 'pending'), 0) AS pending,
-         COALESCE(SUM(approval_status = 'approved'), 0) AS approved,
-         COALESCE(SUM(approval_status = 'rejected'), 0) AS rejected
-       FROM provider_profiles`
+        (
+          SELECT COUNT(*)
+          FROM users
+          WHERE role = 'customer'
+        ) AS customers_total,
+
+        (
+          SELECT COUNT(*)
+          FROM users
+          WHERE role = 'provider'
+        ) AS providers_total,
+
+        (
+          SELECT COUNT(*)
+          FROM provider_profiles
+          WHERE approval_status = 'pending'
+        ) AS providers_pending,
+
+        (
+          SELECT COUNT(*)
+          FROM services
+        ) AS services_total,
+
+        (
+          SELECT COUNT(*)
+          FROM services
+          WHERE approval_status = 'pending'
+        ) AS services_pending,
+
+        (
+          SELECT COUNT(*)
+          FROM bookings
+        ) AS bookings_total,
+
+        (
+          SELECT COUNT(*)
+          FROM bookings
+          WHERE status = 'pending'
+        ) AS bookings_pending,
+
+        (
+          SELECT COUNT(*)
+          FROM bookings
+          WHERE status = 'completed'
+        ) AS bookings_completed,
+
+        (
+          SELECT COUNT(*)
+          FROM bookings
+          WHERE status = 'cancelled'
+        ) AS bookings_cancelled,
+
+        (
+          SELECT COUNT(*)
+          FROM reviews
+        ) AS reviews_total`
     );
+
+    const [bookingsResult, providersResult, servicesResult] =
+      await Promise.all([
+        pool.query(
+          `SELECT
+            b.id,
+            b.created_at AS "createdAt",
+            cu.full_name AS "customerName",
+            pu.full_name AS "providerName",
+            s.service_name AS "serviceName",
+            b.status
+           FROM bookings b
+           JOIN users cu ON cu.id = b.customer_id
+           JOIN users pu ON pu.id = b.provider_id
+           JOIN services s ON s.id = b.service_id
+           ORDER BY b.created_at DESC
+           LIMIT 5`
+        ),
+
+        pool.query(
+          `SELECT
+            u.full_name AS "fullName",
+            p.business_name AS "businessName",
+            p.approval_status AS "approvalStatus",
+            p.created_at AS "createdAt"
+           FROM provider_profiles p
+           JOIN users u ON u.id = p.user_id
+           WHERE u.role = 'provider'
+           ORDER BY p.created_at DESC NULLS LAST
+           LIMIT 5`
+        ),
+
+        pool.query(
+          `SELECT
+            s.id,
+            s.service_name AS "serviceName",
+            pu.full_name AS "providerName",
+            s.category,
+            s.approval_status AS "approvalStatus"
+           FROM services s
+           JOIN users pu ON pu.id = s.provider_id
+           ORDER BY s.created_at DESC
+           LIMIT 5`
+        )
+      ]);
+
+    const counts = statsResult.rows[0];
+
     res.json({
-      services: Object.fromEntries(
-        Object.entries(serviceRows[0]).map(([key, value]) => [key, Number(value)])
-      ),
-      providers: Object.fromEntries(
-        Object.entries(providerRows[0]).map(([key, value]) => [key, Number(value)])
+      stats: {
+        customers: {
+          total: counts.customers_total
+        },
+        providers: {
+          total: counts.providers_total,
+          pending: counts.providers_pending
+        },
+        services: {
+          total: counts.services_total,
+          pending: counts.services_pending
+        },
+        bookings: {
+          total: counts.bookings_total,
+          pending: counts.bookings_pending,
+          completed: counts.bookings_completed,
+          cancelled: counts.bookings_cancelled
+        },
+        reviews: {
+          total: counts.reviews_total
+        }
+      },
+      recentActivity: {
+        recentBookings: bookingsResult.rows,
+        recentProviders: providersResult.rows,
+        recentServices: servicesResult.rows
+      }
+    });
+  }));
+
+
+  // ==========================================
+  // CUSTOMERS
+  // ==========================================
+
+
+  router.get('/customers', asyncHandler(async (req, res) => {
+    const { page, limit, offset } = pagination(req);
+    const search = String(req.query.search || '').trim();
+
+    const values = [];
+    let where = `WHERE u.role = 'customer'`;
+
+    if (search) {
+      values.push(`%${search}%`);
+
+      where += ` AND (
+        u.full_name ILIKE $${values.length}
+        OR u.email ILIKE $${values.length}
+        OR u.phone ILIKE $${values.length}
+      )`;
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM users u
+       ${where}`,
+      values
+    );
+
+    const listValues = [...values, limit, offset];
+
+    const result = await pool.query(
+      `SELECT
+        u.id AS "customerId",
+        u.full_name AS "fullName",
+        u.email,
+        u.phone,
+        CASE
+          WHEN u.is_active THEN 'active'
+          ELSE 'blocked'
+        END AS "accountStatus",
+        u.created_at AS "createdAt",
+        (
+          SELECT COUNT(*)::int
+          FROM bookings b
+          WHERE b.customer_id = u.id
+        ) AS "bookingCount"
+       FROM users u
+       ${where}
+       ORDER BY u.created_at DESC
+       LIMIT $${listValues.length - 1}
+       OFFSET $${listValues.length}`,
+      listValues
+    );
+
+    res.json({
+      customers: result.rows,
+      pagination: paginationMeta(
+        page,
+        limit,
+        countResult.rows[0].total
       )
     });
   }));
 
-  router.get('/dashboard/stats', asyncHandler(async (req, res) => {
-    const customerActive = getUserStatusExpression(schema, 'users', 'active');
-    const customerBlocked = getUserStatusExpression(schema, 'users', 'blocked');
-    const providerActive = getUserStatusExpression(schema, 'u', 'active');
-    const providerBlocked = getUserStatusExpression(schema, 'u', 'blocked');
 
-    const [customerRows] = await pool.execute(
-      `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(${customerActive}), 0) AS active,
-         COALESCE(SUM(${customerBlocked}), 0) AS blocked
-       FROM users WHERE role = 'customer'`
-    );
-    const [providerRows] = await pool.execute(
-      `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(approval_status = 'pending'), 0) AS pending,
-         COALESCE(SUM(approval_status = 'approved'), 0) AS approved,
-         COALESCE(SUM(approval_status = 'rejected'), 0) AS rejected,
-         COALESCE(SUM(${providerActive}), 0) AS active,
-         COALESCE(SUM(${providerBlocked}), 0) AS blocked
-       FROM provider_profiles AS p
-       JOIN users AS u ON u.id = p.user_id`
-    );
-    const [serviceRows] = await pool.execute(
-      `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(approval_status = 'pending'), 0) AS pending,
-         COALESCE(SUM(approval_status = 'approved'), 0) AS approved,
-         COALESCE(SUM(approval_status = 'rejected'), 0) AS rejected,
-         COALESCE(SUM(is_available = 1), 0) AS active
-       FROM services`
-    );
-    const [bookingRows] = await pool.execute(
-      `SELECT
-         COUNT(*) AS total,
-         COALESCE(SUM(status = 'pending'), 0) AS pending,
-         COALESCE(SUM(status = 'accepted'), 0) AS accepted,
-         COALESCE(SUM(status = 'cancelled'), 0) AS cancelled,
-         COALESCE(SUM(status = 'completed'), 0) AS completed,
-         COALESCE(SUM(status = 'in_progress'), 0) AS inProgress
-       FROM bookings`
-    );
-    let reviewRows = [{ total: 0 }];
-    if (await tableExists(pool, 'reviews')) {
-      [reviewRows] = await pool.execute('SELECT COUNT(*) AS total FROM reviews');
-    }
 
-    const stats = {
-      customers: {
-        total: Number(customerRows[0].total || 0),
-        active: Number(customerRows[0].active || 0),
-        blocked: Number(customerRows[0].blocked || 0)
-      },
-      providers: {
-        total: Number(providerRows[0].total || 0),
-        pending: Number(providerRows[0].pending || 0),
-        approved: Number(providerRows[0].approved || 0),
-        rejected: Number(providerRows[0].rejected || 0),
-        active: Number(providerRows[0].active || 0),
-        blocked: Number(providerRows[0].blocked || 0)
-      },
-      services: {
-        total: Number(serviceRows[0].total || 0),
-        pending: Number(serviceRows[0].pending || 0),
-        approved: Number(serviceRows[0].approved || 0),
-        rejected: Number(serviceRows[0].rejected || 0),
-        active: Number(serviceRows[0].active || 0)
-      },
-      bookings: {
-        total: Number(bookingRows[0].total || 0),
-        pending: Number(bookingRows[0].pending || 0),
-        accepted: Number(bookingRows[0].accepted || 0),
-        cancelled: Number(bookingRows[0].cancelled || 0),
-        completed: Number(bookingRows[0].completed || 0),
-        inProgress: Number(bookingRows[0].inProgress || 0)
-      },
-      reviews: {
-        total: Number(reviewRows[0].total || 0)
-      }
-    };
-
-    const [recentBookings] = await pool.execute(
-      `SELECT
-         b.id,
-         b.status,
-         b.total_amount AS totalAmount,
-         b.created_at AS createdAt,
-         customer.full_name AS customerName,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       ORDER BY b.created_at DESC
-       LIMIT 5`
-    );
-
-    const [recentProviders] = await pool.execute(
-      `SELECT
-         u.id,
-         u.full_name AS fullName,
-         p.business_name AS businessName,
-         p.created_at AS createdAt,
-         p.approval_status AS approvalStatus
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       WHERE u.role = 'provider'
-       ORDER BY p.created_at DESC
-       LIMIT 5`
-    );
-
-    const [recentServices] = await pool.execute(
-      `SELECT
-         s.id,
-         s.service_name AS serviceName,
-         s.category,
-         s.price,
-         s.approval_status AS approvalStatus,
-         s.created_at AS createdAt,
-         provider.full_name AS providerName
-       FROM services AS s
-       JOIN users AS provider ON provider.id = s.provider_id
-       ORDER BY s.created_at DESC
-       LIMIT 5`
-    );
-
-    res.json({
-      stats,
-      recentActivity: {
-        recentBookings: recentBookings.map((row) => ({
-          ...row,
-          totalAmount: Number(row.totalAmount || 0),
-          createdAt: row.createdAt
-        })),
-        recentProviders: recentProviders.map((row) => ({ ...row, createdAt: row.createdAt })),
-        recentServices: recentServices.map((row) => ({ ...row, price: Number(row.price || 0), createdAt: row.createdAt }))
-      }
-    });
-  }));
-
-  router.get('/dashboard/recent-activity', asyncHandler(async (req, res) => {
-    const [recentBookings] = await pool.execute(
-      `SELECT
-         b.id,
-         b.status,
-         b.total_amount AS totalAmount,
-         b.created_at AS createdAt,
-         customer.full_name AS customerName,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       ORDER BY b.created_at DESC
-       LIMIT 5`
-    );
-
-    const [recentProviders] = await pool.execute(
-      `SELECT
-         u.id,
-         u.full_name AS fullName,
-         p.business_name AS businessName,
-         p.created_at AS createdAt,
-         p.approval_status AS approvalStatus
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       WHERE u.role = 'provider'
-       ORDER BY p.created_at DESC
-       LIMIT 5`
-    );
-
-    const [recentServices] = await pool.execute(
-      `SELECT
-         s.id,
-         s.service_name AS serviceName,
-         s.category,
-         s.price,
-         s.approval_status AS approvalStatus,
-         s.created_at AS createdAt,
-         provider.full_name AS providerName
-       FROM services AS s
-       JOIN users AS provider ON provider.id = s.provider_id
-       ORDER BY s.created_at DESC
-       LIMIT 5`
-    );
-
-    res.json({
-      recentBookings: recentBookings.map((row) => ({
-        ...row,
-        totalAmount: Number(row.totalAmount || 0),
-        createdAt: row.createdAt
-      })),
-      recentProviders: recentProviders.map((row) => ({ ...row, createdAt: row.createdAt })),
-      recentServices: recentServices.map((row) => ({ ...row, price: Number(row.price || 0), createdAt: row.createdAt }))
-    });
-  }));
-
-  router.get('/customers', [
-    query('status').optional().isIn(['active', 'blocked', 'all']).withMessage('Choose active, blocked, or all.'),
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  router.get('/customers/:customerId', [
+    param('customerId').isInt({ min: 1 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const search = (req.query.search || '').trim();
-    const status = req.query.status || 'all';
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
+    const customerId = Number(req.params.customerId);
 
-    const filters = ['u.role = ?'];
-    const values = ['customer'];
+    const result = await pool.query(
+      `SELECT
+        u.id AS "customerId",
+        u.full_name AS "fullName",
+        u.email,
+        u.phone,
+        CASE
+          WHEN u.is_active THEN 'active'
+          ELSE 'blocked'
+        END AS "accountStatus",
+        u.created_at AS "createdAt",
+        cp.address,
+        cp.area,
+        cp.city,
+        cp.profile_image AS "profileImage"
+       FROM users u
+       LEFT JOIN customer_profiles cp ON cp.user_id = u.id
+       WHERE u.id = $1 AND u.role = 'customer'`,
+      [customerId]
+    );
 
-    if (status !== 'all') {
-      filters.push(`${getUserStatusSql(schema, 'u')} = ?`);
+    if (!result.rowCount) {
+      return res.status(404).json({
+        error: 'Customer not found.'
+      });
+    }
+
+    const bookingsResult = await pool.query(
+      `SELECT
+        b.id,
+        s.service_name AS "serviceName",
+        pu.full_name AS "providerName",
+        b.booking_date AS "bookingDate",
+        b.status,
+        b.total_amount AS "totalAmount"
+       FROM bookings b
+       JOIN users pu ON pu.id = b.provider_id
+       JOIN services s ON s.id = b.service_id
+       WHERE b.customer_id = $1
+       ORDER BY b.created_at DESC
+       LIMIT 10`,
+      [customerId]
+    );
+
+    res.json({
+      customer: result.rows[0],
+      recentBookings: bookingsResult.rows
+    });
+  }));
+
+
+
+  router.patch('/customers/:customerId/status', [
+  param('customerId').isInt({ min: 1 }),
+  body('status').isIn(['active', 'blocked']),
+  validateRequest
+], asyncHandler(async (req, res) => {
+  const customerId = Number(req.params.customerId);
+  const isActive = req.body.status === 'active';
+  const adminId = adminIdFromRequest(req);
+
+  const customer = await withTransaction(pool, async (client) => {
+    const result = await client.query(
+      `UPDATE users
+       SET is_active = $1
+       WHERE id = $2 AND role = 'customer'
+       RETURNING
+         id,
+         is_active AS "isActive",
+         CASE
+           WHEN is_active THEN 'active'
+           ELSE 'blocked'
+         END AS "accountStatus"`,
+      [isActive, customerId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    await writeAuditLog(
+      client,
+      adminId,
+      'customer',
+      customerId,
+      isActive ? 'activated' : 'blocked',
+      isActive
+        ? 'Customer activated by admin.'
+        : 'Customer blocked by admin.'
+    );
+
+    return result.rows[0];
+  });
+
+  if (!customer) {
+    return res.status(404).json({
+      error: 'Customer not found.'
+    });
+  }
+
+  res.json({
+    message: 'Customer status updated.',
+    customer
+  });
+}));
+
+
+  // ==========================================
+  // PROVIDERS
+  // ==========================================
+
+
+  router.get('/providers', asyncHandler(async (req, res) => {
+    const { page, limit, offset } = pagination(req);
+    const status = String(req.query.status || '').trim();
+    const search = String(req.query.search || '').trim();
+
+    const values = [];
+    let where = `WHERE u.role = 'provider'`;
+
+    if (status && status !== 'all') {
       values.push(status);
+      where += ` AND p.approval_status = $${values.length}`;
     }
 
     if (search) {
-      filters.push(`(u.full_name LIKE ? OR u.email LIKE ? OR ${userPhoneColumn} LIKE ?)`);
-      const term = `%${search}%`;
-      values.push(term, term, term);
+      values.push(`%${search}%`);
+
+      where += ` AND (
+        u.full_name ILIKE $${values.length}
+        OR u.email ILIKE $${values.length}
+        OR p.business_name ILIKE $${values.length}
+      )`;
     }
 
-    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const [countRows] = await pool.execute(
+    const countResult = await pool.query(
       `SELECT COUNT(*) AS total
-       FROM users AS u ${whereClause}`,
+       FROM users u
+       LEFT JOIN provider_profiles p ON p.user_id = u.id
+       ${where}`,
       values
     );
-    const total = Number(countRows[0].total || 0);
-    const pagination = buildPagination(page, limit, total);
 
-    const sql = hasPagination
-      ? `SELECT
-         u.id AS customerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         u.created_at AS createdAt,
-         COUNT(b.id) AS bookingCount
-       FROM users AS u
-       LEFT JOIN bookings AS b ON b.customer_id = u.id
-       ${whereClause}
-       GROUP BY u.id
-       ORDER BY u.created_at DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         u.id AS customerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         u.created_at AS createdAt,
-         COUNT(b.id) AS bookingCount
-       FROM users AS u
-       LEFT JOIN bookings AS b ON b.customer_id = u.id
-       ${whereClause}
-       GROUP BY u.id
-       ORDER BY u.created_at DESC`;
+    const listValues = [...values, limit, offset];
 
-    const queryValues = hasPagination ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit] : values;
-    const [rows] = await pool.execute(sql, queryValues);
-
-    res.json({
-      customers: rows,
-      pagination: hasPagination ? pagination : { page: 1, limit: rows.length || 0, total, totalPages: 1, hasNextPage: false }
-    });
-  }));
-
-  router.get('/customers/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Customer ID must be a positive integer.').toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const [customerRows] = await pool.execute(
+    const result = await pool.query(
       `SELECT
-         u.id AS customerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         u.created_at AS createdAt,
-         cp.address,
-         cp.area,
-         cp.city
-       FROM users AS u
-       LEFT JOIN customer_profiles AS cp ON cp.user_id = u.id
-       WHERE u.id = ? AND u.role = 'customer'
-       LIMIT 1`,
-      [req.params.id]
-    );
-
-    if (customerRows.length === 0) {
-      return res.status(404).json({ error: 'Customer not found.' });
-    }
-
-    const [bookingRows] = await pool.execute(
-      `SELECT
-         b.id,
-         b.booking_date AS bookingDate,
-         b.booking_time AS bookingTime,
-         b.status,
-         b.total_amount AS totalAmount,
-         b.created_at AS createdAt,
-         s.service_name AS serviceName,
-         provider.full_name AS providerName
-       FROM bookings AS b
-       JOIN services AS s ON s.id = b.service_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       WHERE b.customer_id = ?
-       ORDER BY b.created_at DESC
-       LIMIT 10`,
-      [req.params.id]
+        u.id AS "providerId",
+        u.full_name AS "fullName",
+        u.email,
+        u.phone,
+        CASE
+          WHEN u.is_active THEN 'active'
+          ELSE 'blocked'
+        END AS "accountStatus",
+        p.business_name AS "businessName",
+        p.experience_years AS "experienceYears",
+        p.service_area AS "serviceArea",
+        p.description,
+        p.approval_status AS "approvalStatus",
+        p.created_at AS "createdAt",
+        (
+          SELECT COUNT(*)::int
+          FROM bookings b
+          WHERE b.provider_id = u.id
+        ) AS "bookingCount"
+       FROM users u
+       LEFT JOIN provider_profiles p ON p.user_id = u.id
+       ${where}
+       ORDER BY p.created_at DESC NULLS LAST
+       LIMIT $${listValues.length - 1}
+       OFFSET $${listValues.length}`,
+      listValues
     );
 
     res.json({
-      customer: customerRows[0],
-      recentBookings: bookingRows
+      providers: result.rows,
+      pagination: paginationMeta(
+        page,
+        limit,
+        countResult.rows[0].total
+      )
     });
   }));
 
-  router.patch('/customers/:id/status', [
-    param('id').isInt({ min: 1 }).withMessage('Customer ID must be a positive integer.').toInt(),
-    body('status').isIn(['active', 'blocked']).withMessage('Use active or blocked.'),
+
+
+  router.get('/providers/:providerId', [
+    param('providerId').isInt({ min: 1 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const statusValue = normalizeUserStatus(schema, req.body.status);
-    const updateSql = schema?.users?.has('account_status')
-      ? 'UPDATE users SET account_status = ? WHERE id = ? AND role = ?'
-      : 'UPDATE users SET is_active = ? WHERE id = ? AND role = ?';
+    const providerId = Number(req.params.providerId);
 
-    const [result] = await pool.execute(updateSql, [statusValue, req.params.id, 'customer']);
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute(
-        'SELECT id FROM users WHERE id = ? AND role = ? LIMIT 1',
-        [req.params.id, 'customer']
-      );
-      if (rows.length === 0) return res.status(404).json({ error: 'Customer not found.' });
-    }
-
-    res.json({
-      message: `Customer account ${req.body.status}.`,
-      customer: { id: Number(req.params.id), accountStatus: req.body.status }
-    });
-  }));
-
-  router.get('/providers', [
-    query('status').optional().isIn(['pending', 'approved', 'rejected', 'all']).withMessage('Choose pending, approved, rejected, or all.'),
-    query('accountStatus').optional().isIn(['active', 'blocked', 'all']).withMessage('Choose active, blocked, or all.'),
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const status = req.query.status || 'pending';
-    const accountStatus = req.query.accountStatus || 'all';
-    const search = (req.query.search || '').trim();
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
-
-    const filters = ['u.role = ?'];
-    const values = ['provider'];
-    if (status !== 'all') {
-      filters.push('p.approval_status = ?');
-      values.push(status);
-    }
-    if (accountStatus !== 'all') {
-      filters.push(`${getUserStatusSql(schema, 'u')} = ?`);
-      values.push(accountStatus);
-    }
-    if (search) {
-      filters.push(`(u.full_name LIKE ? OR u.email LIKE ? OR p.business_name LIKE ? OR ${providerAreaColumn} LIKE ?)`);
-      const term = `%${search}%`;
-      values.push(term, term, term, term);
-    }
-
-    const whereClause = `WHERE ${filters.join(' AND ')}`;
-    const [countRows] = await pool.execute(
-      `SELECT COUNT(*) AS total
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       ${whereClause}`,
-      values
-    );
-    const total = Number(countRows[0].total || 0);
-    const pagination = buildPagination(page, limit, total);
-
-    const sql = hasPagination
-      ? `SELECT
-         p.user_id AS providerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         p.business_name AS businessName,
-         ${providerExperienceColumn} AS experience,
-         ${providerAreaColumn} AS serviceArea,
-         ${providerDescriptionColumn} AS description,
-         p.approval_status AS approvalStatus,
-         CASE WHEN p.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'provider' AND audit.entity_id = p.user_id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         p.created_at AS createdAt
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       ${whereClause}
-       ORDER BY p.created_at DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         p.user_id AS providerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         p.business_name AS businessName,
-         ${providerExperienceColumn} AS experience,
-         ${providerAreaColumn} AS serviceArea,
-         ${providerDescriptionColumn} AS description,
-         p.approval_status AS approvalStatus,
-         CASE WHEN p.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'provider' AND audit.entity_id = p.user_id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         p.created_at AS createdAt
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       ${whereClause}
-       ORDER BY p.created_at DESC`;
-
-    const queryValues = hasPagination ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit] : values;
-    const [rows] = await pool.execute(sql, queryValues);
-
-    res.json({ providers: rows, pagination: hasPagination ? pagination : { page: 1, limit: rows.length || 0, total, totalPages: 1, hasNextPage: false } });
-  }));
-
-  router.get('/providers/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Provider ID must be a positive integer.').toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const [providerRows] = await pool.execute(
+    const result = await pool.query(
       `SELECT
-         u.id AS providerId,
-         u.full_name AS fullName,
-         u.email,
-         ${userPhoneColumn} AS phone,
-         ${getUserStatusSql(schema, 'u')} AS accountStatus,
-         p.business_name AS businessName,
-         ${providerExperienceColumn} AS experience,
-         ${providerAreaColumn} AS serviceArea,
-         ${providerDescriptionColumn} AS description,
-         p.approval_status AS approvalStatus,
-         CASE WHEN p.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'provider' AND audit.entity_id = p.user_id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         ${providerAddressColumn} AS address,
-         ${providerCityColumn} AS city,
-         p.created_at AS createdAt
-       FROM users AS u
-       JOIN provider_profiles AS p ON p.user_id = u.id
-       WHERE u.id = ? AND u.role = 'provider'
-       LIMIT 1`,
-      [req.params.id]
+        u.id AS "providerId",
+        u.full_name AS "fullName",
+        u.email,
+        u.phone,
+        CASE
+          WHEN u.is_active THEN 'active'
+          ELSE 'blocked'
+        END AS "accountStatus",
+        p.business_name AS "businessName",
+        p.experience_years AS "experience",
+        p.service_area AS "serviceArea",
+        p.description,
+        p.approval_status AS "approvalStatus",
+        (
+          SELECT al.reason
+          FROM admin_audit_log al
+          WHERE al.entity_type = 'provider'
+            AND al.entity_id = u.id
+            AND al.action = 'rejected'
+          ORDER BY al.created_at DESC, al.id DESC
+          LIMIT 1
+        ) AS "rejectionReason",
+        p.created_at AS "createdAt"
+       FROM users u
+       LEFT JOIN provider_profiles p ON p.user_id = u.id
+       WHERE u.id = $1 AND u.role = 'provider'`,
+      [providerId]
     );
 
-    if (providerRows.length === 0) {
-      return res.status(404).json({ error: 'Provider not found.' });
+    if (!result.rowCount) {
+      return res.status(404).json({
+        error: 'Provider not found.'
+      });
     }
 
-    const [serviceRows] = await pool.execute(
+    const servicesResult = await pool.query(
       `SELECT
-         s.id,
-         s.service_name AS serviceName,
-         s.category,
-         s.location,
-         s.price,
-         s.approval_status AS approvalStatus,
-         s.is_available AS isAvailable,
-         s.created_at AS createdAt
-       FROM services AS s
-       WHERE s.provider_id = ?
+        s.service_name AS "serviceName",
+        s.category,
+        s.location,
+        s.approval_status AS "approvalStatus"
+       FROM services s
+       WHERE s.provider_id = $1
        ORDER BY s.created_at DESC
-       LIMIT 10`,
-      [req.params.id]
+       LIMIT 20`,
+      [providerId]
     );
 
-    const [bookingRows] = await pool.execute(
+    const bookingsResult = await pool.query(
       `SELECT
-         b.id,
-         b.booking_date AS bookingDate,
-         b.booking_time AS bookingTime,
-         b.status,
-         b.total_amount AS totalAmount,
-         customer.full_name AS customerName,
-         s.service_name AS serviceName
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN services AS s ON s.id = b.service_id
-       WHERE b.provider_id = ?
+        b.id,
+        cu.full_name AS "customerName",
+        s.service_name AS "serviceName",
+        b.booking_date AS "bookingDate",
+        b.status,
+        b.total_amount AS "totalAmount"
+       FROM bookings b
+       JOIN users cu ON cu.id = b.customer_id
+       JOIN services s ON s.id = b.service_id
+       WHERE b.provider_id = $1
        ORDER BY b.created_at DESC
        LIMIT 10`,
-      [req.params.id]
+      [providerId]
     );
 
     res.json({
-      provider: providerRows[0],
-      services: serviceRows,
-      recentBookings: bookingRows
+      provider: result.rows[0],
+      services: servicesResult.rows,
+      recentBookings: bookingsResult.rows
     });
   }));
+
 
   router.patch('/providers/:providerId/approve', [
-    param('providerId').isInt({ min: 1 }).withMessage('Provider ID must be a positive integer.').toInt(),
+    param('providerId').isInt({ min: 1 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const [result] = await pool.execute(
-      `UPDATE provider_profiles AS p
-       JOIN users AS u ON u.id = p.user_id
-       SET p.approval_status = 'approved'
-       WHERE p.user_id = ? AND u.role = 'provider'`,
-      [req.params.providerId]
-    );
+    const providerId = Number(req.params.providerId);
+    const adminId = adminIdFromRequest(req);
 
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute(
+    const outcome = await withTransaction(pool, async (client) => {
+      const provider = await client.query(
         `SELECT p.user_id
-         FROM provider_profiles AS p
-         JOIN users AS u ON u.id = p.user_id
-         WHERE p.user_id = ? AND u.role = 'provider'
-         LIMIT 1`,
-        [req.params.providerId]
+         FROM provider_profiles p
+         JOIN users u ON u.id = p.user_id
+         WHERE p.user_id = $1 AND u.role = 'provider'
+         FOR UPDATE OF u, p`,
+        [providerId]
       );
-      if (rows.length === 0) return res.status(404).json({ error: 'Provider not found.' });
+
+      if (!provider.rowCount) return null;
+
+      await client.query(
+        `UPDATE provider_profiles
+         SET approval_status = 'approved'
+         WHERE user_id = $1`,
+        [providerId]
+      );
+
+      await writeAuditLog(
+        client,
+        adminId,
+        'provider',
+        providerId,
+        'approved',
+        'Provider approved by admin.'
+      );
+
+      return {
+        userId: providerId,
+        approvalStatus: 'approved'
+      };
+    });
+
+    if (!outcome) {
+      return res.status(404).json({
+        error: 'Provider not found.'
+      });
     }
 
     res.json({
-      message: 'Provider approved.',
-      provider: { id: Number(req.params.providerId), approvalStatus: 'approved' }
+      message: 'Provider approved successfully.',
+      provider: outcome
     });
   }));
 
   router.patch('/providers/:providerId/reject', [
-    param('providerId').isInt({ min: 1 }).withMessage('Provider ID must be a positive integer.').toInt(),
-    body('reason').isString().trim().isLength({ min: 5, max: 1000 }).withMessage('A rejection reason between 5 and 1,000 characters is required.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const updated = await withTransaction(pool, async (connection) => {
-      const [rows] = await connection.execute(
-        `SELECT p.user_id
-         FROM provider_profiles AS p
-         JOIN users AS u ON u.id = p.user_id
-         WHERE p.user_id = ? AND u.role = 'provider'
-         FOR UPDATE`,
-        [req.params.providerId]
-      );
-      if (rows.length === 0) return false;
-      await connection.execute(
-        "UPDATE provider_profiles SET approval_status = 'rejected' WHERE user_id = ?",
-        [req.params.providerId]
-      );
-      await writeAuditLog(connection, req.user.id, 'provider', req.params.providerId, 'rejected', req.body.reason);
-      return true;
-    });
-
-    if (!updated) {
-      return res.status(404).json({ error: 'Provider not found.' });
-    }
-
-    res.json({
-      message: 'Provider rejected.',
-      provider: { id: Number(req.params.providerId), approvalStatus: 'rejected', reason: req.body.reason }
-    });
-  }));
-
-  router.patch('/providers/:providerId/status', [
-    param('providerId').isInt({ min: 1 }).withMessage('Provider ID must be a positive integer.').toInt(),
-    body('status').isIn(['active', 'blocked']).withMessage('Use active or blocked.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const statusValue = normalizeUserStatus(schema, req.body.status);
-    const updateSql = schema?.users?.has('account_status')
-      ? 'UPDATE users SET account_status = ? WHERE id = ? AND role = ?'
-      : 'UPDATE users SET is_active = ? WHERE id = ? AND role = ?';
-
-    const [result] = await pool.execute(updateSql, [statusValue, req.params.providerId, 'provider']);
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute(
-        'SELECT id FROM users WHERE id = ? AND role = ? LIMIT 1',
-        [req.params.providerId, 'provider']
-      );
-      if (rows.length === 0) return res.status(404).json({ error: 'Provider not found.' });
-    }
-
-    res.json({
-      message: 'Provider account updated.',
-      provider: { id: Number(req.params.providerId), accountStatus: req.body.status }
-    });
-  }));
-
-  router.patch('/providers/:providerId/approval', [
-    param('providerId').isInt({ min: 1 }).withMessage('Provider ID must be a positive integer.').toInt(),
-    body('approvalStatus').isIn(['approved', 'rejected']).withMessage('Choose approved or rejected.'),
+    param('providerId').isInt({ min: 1 }),
     body('reason')
-      .if(body('approvalStatus').equals('rejected'))
-      .isString().withMessage('A rejection reason is required.')
+      .isString()
       .bail()
       .trim()
-      .isLength({ min: 5, max: 1000 }).withMessage('Rejection reason must be between 5 and 1,000 characters.'),
+      .isLength({ min: 5, max: 1000 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    if (req.body.approvalStatus === 'rejected') {
-      const updated = await withTransaction(pool, async (connection) => {
-        const [rows] = await connection.execute(
-          `SELECT p.user_id
-           FROM provider_profiles AS p
-           JOIN users AS u ON u.id = p.user_id
-           WHERE p.user_id = ? AND u.role = 'provider'
-           FOR UPDATE`,
-          [req.params.providerId]
-        );
-        if (rows.length === 0) return false;
-        await connection.execute(
-          "UPDATE provider_profiles SET approval_status = 'rejected' WHERE user_id = ?",
-          [req.params.providerId]
-        );
-        await writeAuditLog(connection, req.user.id, 'provider', req.params.providerId, 'rejected', req.body.reason);
-        return true;
-      });
-      if (!updated) return res.status(404).json({ error: 'Provider not found.' });
-      return res.json({
-        message: 'Provider rejected.',
-        provider: { id: Number(req.params.providerId), approvalStatus: 'rejected', reason: req.body.reason }
-      });
-    }
+    const providerId = Number(req.params.providerId);
+    const reason = String(req.body.reason).trim();
+    const adminId = adminIdFromRequest(req);
 
-    const [result] = await pool.execute(
-      `UPDATE provider_profiles AS p
-       JOIN users AS u ON u.id = p.user_id
-       SET p.approval_status = ?
-       WHERE p.user_id = ? AND u.role = ?`,
-      [req.body.approvalStatus, req.params.providerId, 'provider']
-    );
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute(
+    const outcome = await withTransaction(pool, async (client) => {
+      const provider = await client.query(
         `SELECT p.user_id
-         FROM provider_profiles AS p
-         JOIN users AS u ON u.id = p.user_id
-         WHERE p.user_id = ? AND u.role = ?
-         LIMIT 1`,
-        [req.params.providerId, 'provider']
+         FROM provider_profiles p
+         JOIN users u ON u.id = p.user_id
+         WHERE p.user_id = $1 AND u.role = 'provider'
+         FOR UPDATE OF u, p`,
+        [providerId]
       );
-      if (rows.length === 0) return res.status(404).json({ error: 'Provider not found.' });
+
+      if (!provider.rowCount) return null;
+
+      await client.query(
+        `UPDATE provider_profiles
+         SET approval_status = 'rejected'
+         WHERE user_id = $1`,
+        [providerId]
+      );
+
+      await writeAuditLog(
+        client,
+        adminId,
+        'provider',
+        providerId,
+        'rejected',
+        reason
+      );
+
+      return {
+        userId: providerId,
+        approvalStatus: 'rejected',
+        reason
+      };
+    });
+
+    if (!outcome) {
+      return res.status(404).json({
+        error: 'Provider not found.'
+      });
     }
 
     res.json({
-      message: `Provider ${req.body.approvalStatus}.`,
-      provider: { id: Number(req.params.providerId), approvalStatus: req.body.approvalStatus }
+      message: 'Provider rejected successfully.',
+      provider: outcome
     });
   }));
 
-  router.get('/services', [
-    query('status').optional().isIn(['pending', 'approved', 'rejected', 'all']).withMessage('Choose pending, approved, rejected, or all.'),
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('category').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Category must be between 1 and 100 characters.'),
-    query('providerId').optional().isInt({ min: 1 }).toInt(),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const status = req.query.status || 'pending';
-    const search = (req.query.search || '').trim();
-    const category = (req.query.category || '').trim();
-    const providerId = req.query.providerId ? safeNumber(req.query.providerId, 0) : 0;
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
 
-    const filters = [];
-    const values = [];
 
-    if (status !== 'all') {
-      filters.push('s.approval_status = ?');
+router.patch('/providers/:providerId/status', [
+  param('providerId').isInt({ min: 1 }),
+  body('status').isIn(['active', 'blocked']),
+  validateRequest
+], asyncHandler(async (req, res) => {
+  const providerId = Number(req.params.providerId);
+  const isActive = req.body.status === 'active';
+  const adminId = adminIdFromRequest(req);
+
+  const provider = await withTransaction(pool, async (client) => {
+    const result = await client.query(
+      `UPDATE users
+       SET is_active = $1
+       WHERE id = $2 AND role = 'provider'
+       RETURNING
+         id,
+         is_active AS "isActive",
+         CASE
+           WHEN is_active THEN 'active'
+           ELSE 'blocked'
+         END AS "accountStatus"`,
+      [isActive, providerId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    await writeAuditLog(
+      client,
+      adminId,
+      'provider',
+      providerId,
+      isActive ? 'activated' : 'blocked',
+      isActive
+        ? 'Provider activated by admin.'
+        : 'Provider blocked by admin.'
+    );
+
+    return result.rows[0];
+  });
+
+  if (!provider) {
+    return res.status(404).json({
+      error: 'Provider not found.'
+    });
+  }
+
+  res.json({
+    message: 'Provider status updated.',
+    provider
+  });
+}));
+
+
+
+  // ==========================================
+  // SERVICES
+  // ==========================================
+
+
+router.get('/services', asyncHandler(async (req, res) => {
+  const { page, limit, offset } = pagination(req);
+  const status = String(req.query.status || '').trim();
+  const category = String(req.query.category || '').trim();
+  const search = String(req.query.search || '').trim();
+
+  const values = [];
+  const conditions = [];
+
+  if (status && status !== 'all') {
+    if (status === 'available') {
+      conditions.push('s.is_available = TRUE');
+    } else if (status === 'unavailable') {
+      conditions.push('s.is_available = FALSE');
+    } else {
       values.push(status);
+      conditions.push(`s.approval_status = $${values.length}`);
     }
-    if (search) {
-      filters.push('(s.service_name LIKE ? OR s.category LIKE ? OR s.location LIKE ? OR provider.full_name LIKE ?)');
-      const term = `%${search}%`;
-      values.push(term, term, term, term);
-    }
-    if (category) {
-      filters.push('s.category = ?');
-      values.push(category);
-    }
-    if (providerId > 0) {
-      filters.push('s.provider_id = ?');
-      values.push(providerId);
-    }
+  }
 
-    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const [countRows] = await pool.execute(
-      `SELECT COUNT(*) AS total
-       FROM services AS s
-       JOIN users AS provider ON provider.id = s.provider_id
-       ${whereClause}`,
-      values
-    );
-    const total = Number(countRows[0].total || 0);
-    const pagination = buildPagination(page, limit, total);
+  if (category) {
+    values.push(category);
+    conditions.push(`s.category = $${values.length}`);
+  }
 
-    const sql = hasPagination
-      ? `SELECT
-         s.id,
-         s.provider_id AS providerId,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName,
-         s.category,
-         s.description,
-         s.location,
-         ${serviceImageColumn} AS image,
-         s.price,
-         ${servicePriceTypeColumn} AS priceType,
-         s.is_available AS isAvailable,
-         s.approval_status AS approvalStatus,
-         CASE WHEN s.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'service' AND audit.entity_id = s.id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         s.created_at AS createdAt
-       FROM services AS s
-       JOIN users AS provider ON provider.id = s.provider_id
-       ${whereClause}
-       ORDER BY s.created_at DESC, s.id DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         s.id,
-         s.provider_id AS providerId,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName,
-         s.category,
-         s.description,
-         s.location,
-         ${serviceImageColumn} AS image,
-         s.price,
-         ${servicePriceTypeColumn} AS priceType,
-         s.is_available AS isAvailable,
-         s.approval_status AS approvalStatus,
-         CASE WHEN s.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'service' AND audit.entity_id = s.id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         s.created_at AS createdAt
-       FROM services AS s
-       JOIN users AS provider ON provider.id = s.provider_id
-       ${whereClause}
-       ORDER BY s.created_at DESC, s.id DESC`;
+  if (search) {
+    values.push(`%${search}%`);
+    conditions.push(`(
+      s.service_name ILIKE $${values.length}
+      OR s.category ILIKE $${values.length}
+      OR s.location ILIKE $${values.length}
+    )`);
+  }
 
-    const queryValues = hasPagination ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit] : values;
-    const [rows] = await pool.execute(sql, queryValues);
+  const where = conditions.length
+    ? `WHERE ${conditions.join(' AND ')}`
+    : '';
 
-    res.json({
-      services: rows.map((service) => ({ ...service, isAvailable: Boolean(service.isAvailable) })),
-      pagination: hasPagination ? pagination : { page: 1, limit: rows.length || 0, total, totalPages: 1, hasNextPage: false }
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total
+     FROM services s
+     JOIN users u ON u.id = s.provider_id
+     ${where}`,
+    values
+  );
+
+  const listValues = [...values, limit, offset];
+
+  const result = await pool.query(
+    `SELECT
+      s.id,
+      s.provider_id AS "providerId",
+      u.full_name AS "providerName",
+      s.service_name AS "serviceName",
+      s.category,
+      s.description,
+      s.location,
+      s.image,
+      s.price,
+      s.price_type AS "priceType",
+      s.is_available AS "isAvailable",
+      s.approval_status AS "approvalStatus",
+      s.created_at AS "createdAt"
+     FROM services s
+     JOIN users u ON u.id = s.provider_id
+     ${where}
+     ORDER BY s.created_at DESC
+     LIMIT $${listValues.length - 1}
+     OFFSET $${listValues.length}`,
+    listValues
+  );
+
+  res.json({
+    services: result.rows,
+    pagination: paginationMeta(
+      page,
+      limit,
+      countResult.rows[0].total
+    )
+  });
+}));
+
+
+
+
+router.get('/services/:serviceId', [
+  param('serviceId').isInt({ min: 1 }),
+  validateRequest
+], asyncHandler(async (req, res) => {
+  const serviceId = Number(req.params.serviceId);
+
+  const result = await pool.query(
+    `SELECT
+      s.id,
+      s.service_name AS "serviceName",
+      pu.full_name AS "providerName",
+      s.provider_id AS "providerId",
+      pp.business_name AS "businessName",
+      s.category,
+      s.description,
+      s.location,
+      s.price,
+      s.price_type AS "priceType",
+      s.approval_status AS "approvalStatus",
+      s.is_available AS "isAvailable",
+      (
+        SELECT al.reason
+        FROM admin_audit_log al
+        WHERE al.entity_type = 'service'
+          AND al.entity_id = s.id
+          AND al.action = 'rejected'
+        ORDER BY al.created_at DESC, al.id DESC
+        LIMIT 1
+      ) AS "rejectionReason",
+      s.created_at AS "createdAt",
+      s.image
+     FROM services s
+     JOIN users pu ON pu.id = s.provider_id
+     LEFT JOIN provider_profiles pp ON pp.user_id = s.provider_id
+     WHERE s.id = $1`,
+    [serviceId]
+  );
+
+  if (!result.rowCount) {
+    return res.status(404).json({
+      error: 'Service not found.'
     });
-  }));
+  }
 
-  router.get('/services/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const [rows] = await pool.execute(
-      `SELECT
-         s.id,
-         s.provider_id AS providerId,
-         provider.full_name AS providerName,
-         p.business_name AS businessName,
-         s.service_name AS serviceName,
-         s.category,
-         s.description,
-         s.location,
-         ${serviceImageColumn} AS image,
-         s.price,
-         ${servicePriceTypeColumn} AS priceType,
-         s.is_available AS isAvailable,
-         s.approval_status AS approvalStatus,
-         CASE WHEN s.approval_status = 'rejected' THEN (
-           SELECT audit.reason
-           FROM admin_audit_log AS audit
-           WHERE audit.entity_type = 'service' AND audit.entity_id = s.id AND audit.action = 'rejected'
-           ORDER BY audit.created_at DESC, audit.id DESC
-           LIMIT 1
-         ) ELSE NULL END AS rejectionReason,
-         s.created_at AS createdAt
-       FROM services AS s
-       JOIN provider_profiles AS p ON p.user_id = s.provider_id
-       JOIN users AS provider ON provider.id = s.provider_id
-       WHERE s.id = ?
-       LIMIT 1`,
-      [req.params.id]
-    );
+  res.json({
+    service: result.rows[0]
+  });
+}));
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Service not found.' });
-    }
 
-    res.json({ service: { ...rows[0], isAvailable: Boolean(rows[0].isAvailable) } });
-  }));
 
   router.patch('/services/:serviceId/approve', [
-    param('serviceId').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
+    param('serviceId').isInt({ min: 1 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const [result] = await pool.execute(
-      "UPDATE services SET approval_status = 'approved' WHERE id = ?",
-      [req.params.serviceId]
-    );
 
-    if (result.affectedRows !== 1) {
-      return res.status(404).json({ error: 'Service not found.' });
-    }
 
-    res.json({
-      message: 'Service approved.',
-      service: { id: Number(req.params.serviceId), approvalStatus: 'approved' }
-    });
-  }));
+    const serviceId = Number(req.params.serviceId);
+    const adminId = adminIdFromRequest(req);
 
-  router.patch('/services/:serviceId/reject', [
-    param('serviceId').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
-    body('reason').isString().trim().isLength({ min: 5, max: 1000 }).withMessage('A rejection reason between 5 and 1,000 characters is required.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const updated = await withTransaction(pool, async (connection) => {
-      const [rows] = await connection.execute(
-        'SELECT id FROM services WHERE id = ? FOR UPDATE',
-        [req.params.serviceId]
+    const outcome = await withTransaction(pool, async (client) => {
+      const service = await client.query(
+        `SELECT id FROM services WHERE id = $1 FOR UPDATE`,
+        [serviceId]
       );
-      if (rows.length === 0) return false;
-      await connection.execute(
-        "UPDATE services SET approval_status = 'rejected' WHERE id = ?",
-        [req.params.serviceId]
+
+      if (!service.rowCount) return false;
+
+      await client.query(
+        `UPDATE services
+         SET approval_status = 'approved'
+         WHERE id = $1`,
+        [serviceId]
       );
-      await writeAuditLog(connection, req.user.id, 'service', req.params.serviceId, 'rejected', req.body.reason);
+
+      await writeAuditLog(
+        client,
+        adminId,
+        'service',
+        serviceId,
+        'approved',
+        'Service approved by admin.'
+      );
+
       return true;
     });
 
-    if (!updated) {
-      return res.status(404).json({ error: 'Service not found.' });
-    }
-
-    res.json({
-      message: 'Service rejected.',
-      service: { id: Number(req.params.serviceId), approvalStatus: 'rejected', reason: req.body.reason }
-    });
-  }));
-
-  router.patch('/services/:serviceId/status', [
-    param('serviceId').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
-    body('isAvailable').isBoolean().withMessage('Availability must be true or false.').toBoolean(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const [result] = await pool.execute(
-      'UPDATE services SET is_available = ? WHERE id = ?',
-      [req.body.isAvailable ? 1 : 0, req.params.serviceId]
-    );
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute('SELECT id FROM services WHERE id = ? LIMIT 1', [req.params.serviceId]);
-      if (rows.length === 0) return res.status(404).json({ error: 'Service not found.' });
-    }
-
-    res.json({
-      message: 'Service availability updated.',
-      service: { id: Number(req.params.serviceId), isAvailable: Boolean(req.body.isAvailable) }
-    });
-  }));
-
-  router.patch('/services/:serviceId/approval', [
-    param('serviceId').isInt({ min: 1 }).withMessage('Service ID must be a positive integer.').toInt(),
-    body('approvalStatus').isIn(['approved', 'rejected']).withMessage('Choose approved or rejected.'),
-    body('reason')
-      .if(body('approvalStatus').equals('rejected'))
-      .isString().withMessage('A rejection reason is required.')
-      .bail()
-      .trim()
-      .isLength({ min: 5, max: 1000 }).withMessage('Rejection reason must be between 5 and 1,000 characters.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    if (req.body.approvalStatus === 'rejected') {
-      const updated = await withTransaction(pool, async (connection) => {
-        const [rows] = await connection.execute(
-          'SELECT id FROM services WHERE id = ? FOR UPDATE',
-          [req.params.serviceId]
-        );
-        if (rows.length === 0) return false;
-        await connection.execute(
-          "UPDATE services SET approval_status = 'rejected' WHERE id = ?",
-          [req.params.serviceId]
-        );
-        await writeAuditLog(connection, req.user.id, 'service', req.params.serviceId, 'rejected', req.body.reason);
-        return true;
-      });
-      if (!updated) return res.status(404).json({ error: 'Service not found.' });
-      return res.json({
-        message: 'Service rejected.',
-        service: { id: Number(req.params.serviceId), approvalStatus: 'rejected', reason: req.body.reason }
+    if (!outcome) {
+      return res.status(404).json({
+        error: 'Service not found.'
       });
     }
 
-    const [result] = await pool.execute(
-      'UPDATE services SET approval_status = ? WHERE id = ?',
-      [req.body.approvalStatus, req.params.serviceId]
-    );
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute('SELECT id FROM services WHERE id = ? LIMIT 1', [req.params.serviceId]);
-      if (rows.length === 0) return res.status(404).json({ error: 'Service not found.' });
-    }
-
-    res.json({
-      message: `Service ${req.body.approvalStatus}.`,
-      service: { id: Number(req.params.serviceId), approvalStatus: req.body.approvalStatus }
-    });
+    res.json({ message: 'Service approved successfully.' });
   }));
 
-  router.get('/bookings', [
-    query('status').optional().isIn(['pending', 'accepted', 'rejected', 'cancelled', 'in_progress', 'completed', 'all']).withMessage('Choose a valid status.'),
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const status = req.query.status || 'all';
-    const search = (req.query.search || '').trim();
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
 
-    const filters = [];
+router.patch('/services/:serviceId/reject', [
+  param('serviceId').isInt({ min: 1 }),
+  body('reason')
+    .isString()
+    .bail()
+    .trim()
+    .isLength({ min: 5, max: 1000 }),
+  validateRequest
+], asyncHandler(async (req, res) => {
+  const serviceId = Number(req.params.serviceId);
+  const reason = String(req.body.reason).trim();
+  const adminId = adminIdFromRequest(req);
+
+  const outcome = await withTransaction(pool, async (client) => {
+    const service = await client.query(
+      `SELECT id FROM services WHERE id = $1 FOR UPDATE`,
+      [serviceId]
+    );
+
+    if (!service.rowCount) return null;
+
+    await client.query(
+      `UPDATE services
+       SET approval_status = 'rejected'
+       WHERE id = $1`,
+      [serviceId]
+    );
+
+    await writeAuditLog(
+      client,
+      adminId,
+      'service',
+      serviceId,
+      'rejected',
+      reason
+    );
+
+    return true;
+  });
+
+  if (!outcome) {
+    return res.status(404).json({
+      error: 'Service not found.'
+    });
+  }
+
+  res.json({
+    message: 'Service rejected successfully.'
+  });
+}));
+
+
+
+router.patch('/services/:serviceId/status', [
+  param('serviceId').isInt({ min: 1 }),
+  body('isAvailable').isBoolean(),
+  validateRequest
+], asyncHandler(async (req, res) => {
+  const serviceId = Number(req.params.serviceId);
+  const isAvailable = req.body.isAvailable;
+  const adminId = adminIdFromRequest(req);
+
+  const service = await withTransaction(pool, async (client) => {
+    const existing = await client.query(
+      `SELECT id FROM services WHERE id = $1 FOR UPDATE`,
+      [serviceId]
+    );
+
+    if (!existing.rowCount) {
+      return null;
+    }
+
+    const result = await client.query(
+      `UPDATE services
+       SET is_available = $1
+       WHERE id = $2
+       RETURNING id, is_available AS "isAvailable"`,
+      [isAvailable, serviceId]
+    );
+
+    await writeAuditLog(
+      client,
+      adminId,
+      'service',
+      serviceId,
+      'availability_updated',
+      isAvailable
+        ? 'Service made available by admin.'
+        : 'Service made unavailable by admin.'
+    );
+
+    return result.rows[0];
+  });
+
+  if (!service) {
+    return res.status(404).json({
+      error: 'Service not found.'
+    });
+  }
+
+  res.json({
+    message: 'Service status updated.',
+    service
+  });
+}));
+
+
+  // ==========================================
+  // BOOKINGS
+  // ==========================================
+
+  router.get('/bookings', asyncHandler(async (req, res) => {
+    const { page, limit, offset } = pagination(req);
+    const status = String(req.query.status || '').trim();
+    const search = String(req.query.search || '').trim();
+
     const values = [];
-    if (status !== 'all') {
-      filters.push('b.status = ?');
+    const conditions = [];
+
+    if (status && status !== 'all') {
       values.push(status);
-    }
-    if (search) {
-      filters.push('(CAST(b.id AS CHAR) LIKE ? OR customer.full_name LIKE ? OR provider.full_name LIKE ? OR s.service_name LIKE ?)');
-      const term = `%${search}%`;
-      values.push(term, term, term, term);
+      conditions.push(`b.status = $${values.length}`);
     }
 
-    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const [countRows] = await pool.execute(
+    if (search) {
+      values.push(`%${search}%`);
+      conditions.push(`(
+        cu.full_name ILIKE $${values.length}
+        OR pu.full_name ILIKE $${values.length}
+        OR s.service_name ILIKE $${values.length}
+      )`);
+    }
+
+    const where = conditions.length
+      ? `WHERE ${conditions.join(' AND ')}`
+      : '';
+
+    const countResult = await pool.query(
       `SELECT COUNT(*) AS total
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       ${whereClause}`,
+       FROM bookings b
+       JOIN users cu ON cu.id = b.customer_id
+       JOIN users pu ON pu.id = b.provider_id
+       JOIN services s ON s.id = b.service_id
+       ${where}`,
       values
     );
-    const total = Number(countRows[0].total || 0);
-    const pagination = buildPagination(page, limit, total);
 
-    const sql = hasPagination
-      ? `SELECT
-         b.id,
-         b.customer_id AS customerId,
-         customer.full_name AS customerName,
-         b.provider_id AS providerId,
-         provider.full_name AS providerName,
-         b.service_id AS serviceId,
-         s.service_name AS serviceName,
-         b.booking_date AS bookingDate,
-         b.booking_time AS bookingTime,
-         b.address,
-         b.total_amount AS totalAmount,
-         b.status,
-         b.created_at AS createdAt
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       ${whereClause}
+    const listValues = [...values, limit, offset];
+
+    const result = await pool.query(
+      `SELECT
+        b.id,
+        b.customer_id AS "customerId",
+        cu.full_name AS "customerName",
+        b.provider_id AS "providerId",
+        pu.full_name AS "providerName",
+        b.service_id AS "serviceId",
+        s.service_name AS "serviceName",
+        b.booking_date AS "bookingDate",
+        b.booking_time AS "bookingTime",
+        b.address,
+        b.customer_phone AS "customerPhone",
+        b.description,
+        b.total_amount AS "totalAmount",
+        b.status,
+        b.rejection_reason AS "rejectionReason",
+        b.created_at AS "createdAt"
+       FROM bookings b
+       JOIN users cu ON cu.id = b.customer_id
+       JOIN users pu ON pu.id = b.provider_id
+       JOIN services s ON s.id = b.service_id
+       ${where}
        ORDER BY b.created_at DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         b.id,
-         b.customer_id AS customerId,
-         customer.full_name AS customerName,
-         b.provider_id AS providerId,
-         provider.full_name AS providerName,
-         b.service_id AS serviceId,
-         s.service_name AS serviceName,
-         b.booking_date AS bookingDate,
-         b.booking_time AS bookingTime,
-         b.address,
-         b.total_amount AS totalAmount,
-         b.status,
-         b.created_at AS createdAt
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       ${whereClause}
-       ORDER BY b.created_at DESC`;
-
-    const queryValues = hasPagination ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit] : values;
-    const [rows] = await pool.execute(sql, queryValues);
-
-    res.json({ bookings: rows, pagination: hasPagination ? pagination : { page: 1, limit: rows.length || 0, total, totalPages: 1, hasNextPage: false } });
-  }));
-
-  router.get('/bookings/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Booking ID must be a positive integer.').toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const [rows] = await pool.execute(
-      `SELECT
-         b.id,
-         b.customer_id AS customerId,
-         customer.full_name AS customerName,
-         customer.email AS customerEmail,
-         b.provider_id AS providerId,
-         provider.full_name AS providerName,
-         b.service_id AS serviceId,
-         s.service_name AS serviceName,
-         s.category AS serviceCategory,
-         b.booking_date AS bookingDate,
-         b.booking_time AS bookingTime,
-         b.address,
-         b.description,
-         b.customer_phone AS customerPhone,
-         b.total_amount AS totalAmount,
-         b.status,
-         b.rejection_reason AS rejectionReason,
-         (SELECT audit.reason
-          FROM admin_audit_log AS audit
-          WHERE audit.entity_type = 'booking' AND audit.entity_id = b.id AND audit.action = 'cancelled'
-          ORDER BY audit.created_at DESC, audit.id DESC
-          LIMIT 1) AS cancellationReason,
-         b.created_at AS createdAt,
-         b.status_updated_at AS statusUpdatedAt
-       FROM bookings AS b
-       JOIN users AS customer ON customer.id = b.customer_id
-       JOIN users AS provider ON provider.id = b.provider_id
-       JOIN services AS s ON s.id = b.service_id
-       WHERE b.id = ?
-       LIMIT 1`,
-      [req.params.id]
+       LIMIT $${listValues.length - 1}
+       OFFSET $${listValues.length}`,
+      listValues
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Booking not found.' });
-    }
-
-    res.json({ booking: rows[0] });
+    res.json({
+      bookings: result.rows,
+      pagination: paginationMeta(
+        page,
+        limit,
+        countResult.rows[0].total
+      )
+    });
   }));
 
-  router.patch('/bookings/:id/cancel', [
-    param('id').isInt({ min: 1 }).withMessage('Booking ID must be a positive integer.').toInt(),
-    body('reason').isString().trim().isLength({ min: 5, max: 1000 }).withMessage('A cancellation reason between 5 and 1,000 characters is required.'),
+
+  router.get('/bookings/:bookingId', [
+    param('bookingId').isInt({ min: 1 }),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const outcome = await withTransaction(pool, async (connection) => {
-      const [bookingRows] = await connection.execute(
-        'SELECT id, status FROM bookings WHERE id = ? FOR UPDATE',
-        [req.params.id]
-      );
-      if (bookingRows.length === 0) return 'not_found';
-      if (!['pending', 'accepted', 'in_progress'].includes(bookingRows[0].status)) return 'conflict';
+    const bookingId = Number(req.params.bookingId);
 
-      const [result] = await connection.execute(
-        `UPDATE bookings
-         SET status = 'cancelled', status_updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND status IN ('pending', 'accepted', 'in_progress')`,
-        [req.params.id]
-      );
-      if (result.affectedRows !== 1) return 'conflict';
-      await writeAuditLog(connection, req.user.id, 'booking', req.params.id, 'cancelled', req.body.reason);
-      return 'cancelled';
-    });
+    const result = await pool.query(
+      `SELECT
+        b.id,
+        b.status,
+        cu.full_name AS "customerName",
+        cu.email AS "customerEmail",
+        b.customer_phone AS "customerPhone",
+        pu.full_name AS "providerName",
+        s.service_name AS "serviceName",
+        s.category AS "serviceCategory",
+        b.booking_date AS "bookingDate",
+        b.booking_time AS "bookingTime",
+        b.address,
+        b.description,
+        b.total_amount AS "totalAmount",
+        b.rejection_reason AS "rejectionReason",
+        (
+          SELECT al.reason
+          FROM admin_audit_log al
+          WHERE al.entity_type = 'booking'
+            AND al.entity_id = b.id
+            AND al.action = 'cancelled'
+          ORDER BY al.created_at DESC, al.id DESC
+          LIMIT 1
+        ) AS "cancellationReason",
+        b.created_at AS "createdAt",
+        b.status_updated_at AS "statusUpdatedAt"
+       FROM bookings b
+       JOIN users cu ON cu.id = b.customer_id
+       JOIN users pu ON pu.id = b.provider_id
+       JOIN services s ON s.id = b.service_id
+       WHERE b.id = $1`,
+      [bookingId]
+    );
 
-    if (outcome === 'not_found') return res.status(404).json({ error: 'Booking not found.' });
-    if (outcome === 'conflict') {
-      return res.status(409).json({ error: 'This booking cannot be cancelled in its current state.' });
+    if (!result.rowCount) {
+      return res.status(404).json({
+        error: 'Booking not found.'
+      });
     }
 
     res.json({
-      message: 'Booking cancelled.',
-      booking: { id: Number(req.params.id), status: 'cancelled', cancellationReason: req.body.reason }
+      booking: result.rows[0]
     });
   }));
 
-  router.get('/reviews', [
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('rating').optional().isInt({ min: 1, max: 5 }).toInt().withMessage('Rating must be between 1 and 5.'),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const exists = await tableExists(pool, 'reviews');
-    if (!exists) {
-      return res.json({ reviews: [], pagination: buildPagination(1, 20, 0) });
+
+  const cancelBookingHandler = asyncHandler(async (req, res) => {
+    const bookingId = Number(req.params.bookingId);
+    const reason = String(req.body.reason || '').trim();
+    const adminId = adminIdFromRequest(req);
+
+    const outcome = await withTransaction(pool, async (client) => {
+      const booking = await client.query(
+        `SELECT id, status FROM bookings WHERE id = $1 FOR UPDATE`,
+        [bookingId]
+      );
+
+      if (!booking.rowCount) {
+        return { notFound: true };
+      }
+
+      const currentStatus = booking.rows[0].status;
+      const allowedStatuses = [
+        'pending',
+        'accepted',
+        'in_progress'
+      ];
+
+      if (!allowedStatuses.includes(currentStatus)) {
+        return {
+          conflict: true,
+          currentStatus
+        };
+      }
+
+      const update = await client.query(
+        `UPDATE bookings
+         SET status = 'cancelled',
+             status_updated_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND status IN ('pending', 'accepted', 'in_progress')
+         RETURNING id, status`,
+        [bookingId]
+      );
+
+      if (!update.rowCount) {
+        return {
+          conflict: true,
+          currentStatus: 'changed'
+        };
+      }
+
+      await writeAuditLog(
+        client,
+        adminId,
+        'booking',
+        bookingId,
+        'cancelled',
+        reason || 'Cancelled by admin.'
+      );
+
+      return {
+        booking: {
+          id: bookingId,
+          status: 'cancelled'
+        }
+      };
+    });
+
+    if (outcome.notFound) {
+      return res.status(404).json({
+        error: 'Booking not found.'
+      });
     }
 
-    const search = (req.query.search || '').trim();
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
-    const filters = [];
+    if (outcome.conflict) {
+      return res.status(409).json({
+        error: `Booking with status "${outcome.currentStatus}" cannot be cancelled.`
+      });
+    }
+
+    res.json({
+      message: 'Booking cancelled successfully.',
+      booking: outcome.booking
+    });
+  });
+
+  router.patch('/bookings/:bookingId/cancel', [
+    param('bookingId').isInt({ min: 1 }),
+    body('reason').optional().isString().trim().isLength({ max: 1000 }),
+    validateRequest
+  ], cancelBookingHandler);
+
+  router.put('/bookings/:bookingId/cancel', [
+    param('bookingId').isInt({ min: 1 }),
+    body('reason').optional().isString().trim().isLength({ max: 1000 }),
+    validateRequest
+  ], cancelBookingHandler);
+
+  // ==========================================
+  // RECENT ACTIVITY
+  // ==========================================
+
+  router.get('/dashboard/recent-activity', asyncHandler(async (req, res) => {
+    const result = await pool.query(
+      `SELECT *
+       FROM (
+         SELECT
+           'booking' AS "entityType",
+           b.id AS "entityId",
+           'Booking created' AS action,
+           cu.full_name AS "actorName",
+           b.created_at AS "createdAt"
+         FROM bookings b
+         LEFT JOIN users cu ON cu.id = b.customer_id
+
+         UNION ALL
+
+         SELECT
+           'review' AS "entityType",
+           r.id AS "entityId",
+           'Review submitted' AS action,
+           cu.full_name AS "actorName",
+           r.created_at AS "createdAt"
+         FROM reviews r
+         LEFT JOIN users cu ON cu.id = r.customer_id
+
+         UNION ALL
+
+         SELECT
+           'contact_message' AS "entityType",
+           cm.id AS "entityId",
+           'Contact message received' AS action,
+           cm.name AS "actorName",
+           cm.created_at AS "createdAt"
+         FROM contact_messages cm
+       ) activity
+       ORDER BY activity."createdAt" DESC
+       LIMIT 20`
+    );
+
+    res.json({ activities: result.rows });
+  }));
+
+  // ==========================================
+  // REVIEWS
+  // ==========================================
+
+  router.get('/reviews', asyncHandler(async (req, res) => {
+    const { page, limit, offset } = pagination(req);
+    const rating = String(req.query.rating || '').trim();
+
     const values = [];
-    if (req.query.rating) {
-      filters.push('r.rating = ?');
-      values.push(req.query.rating);
+    let where = '';
+
+    if (rating) {
+      const parsedRating = Number(rating);
+
+      if (
+        !Number.isInteger(parsedRating) ||
+        parsedRating < 1 ||
+        parsedRating > 5
+      ) {
+        return res.status(400).json({
+          error: 'Invalid rating filter.'
+        });
+      }
+
+      values.push(parsedRating);
+      where = `WHERE r.rating = $${values.length}`;
     }
-    if (search) {
-      filters.push('(CAST(r.id AS CHAR) LIKE ? OR CAST(r.booking_id AS CHAR) LIKE ? OR customer.full_name LIKE ? OR provider.full_name LIKE ? OR s.service_name LIKE ? OR r.comment LIKE ?)');
-      const term = `%${search}%`;
-      values.push(term, term, term, term, term, term);
-    }
-    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const joins = `FROM reviews AS r
-       JOIN users AS customer ON customer.id = r.customer_id
-       JOIN users AS provider ON provider.id = r.provider_id
-       JOIN bookings AS b ON b.id = r.booking_id
-       JOIN services AS s ON s.id = b.service_id`;
-    const [countRows] = await pool.execute(
-      `SELECT COUNT(*) AS total ${joins} ${whereClause}`,
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM reviews r
+       ${where}`,
       values
     );
-    const pagination = buildPagination(page, limit, Number(countRows[0].total || 0));
-    const sql = hasPagination
-      ? `SELECT
-         r.id,
-         r.booking_id AS bookingId,
-         customer.full_name AS customerName,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName,
-         r.rating,
-         r.comment,
-         r.created_at AS createdAt
-       ${joins}
-       ${whereClause}
-       ORDER BY r.created_at DESC, r.id DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         r.id,
-         r.booking_id AS bookingId,
-         customer.full_name AS customerName,
-         provider.full_name AS providerName,
-         s.service_name AS serviceName,
-         r.rating,
-         r.comment,
-         r.created_at AS createdAt
-       ${joins}
-       ${whereClause}
-       ORDER BY r.created_at DESC, r.id DESC`;
-    const queryValues = hasPagination
-      ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit]
-      : values;
-    const [rows] = await pool.execute(
-      sql,
-      queryValues
-    );
 
-    res.json({
-      reviews: rows,
-      pagination: hasPagination
-        ? pagination
-        : { ...pagination, limit: rows.length, hasNextPage: false }
-    });
-  }));
+    const listValues = [...values, limit, offset];
 
-  router.delete('/reviews/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Review ID must be a positive integer.').toInt(),
-    body('reason').isString().trim().isLength({ min: 5, max: 1000 }).withMessage('A removal reason between 5 and 1,000 characters is required.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const exists = await tableExists(pool, 'reviews');
-    if (!exists) {
-      return res.status(404).json({ error: 'Reviews are not available in this installation.' });
-    }
-
-    const removed = await withTransaction(pool, async (connection) => {
-      const [rows] = await connection.execute(
-        'SELECT id FROM reviews WHERE id = ? FOR UPDATE',
-        [req.params.id]
-      );
-      if (rows.length === 0) return false;
-      await writeAuditLog(connection, req.user.id, 'review', req.params.id, 'removed', req.body.reason);
-      const [result] = await connection.execute('DELETE FROM reviews WHERE id = ?', [req.params.id]);
-      return result.affectedRows === 1;
-    });
-    if (!removed) {
-      return res.status(404).json({ error: 'Review not found.' });
-    }
-
-    res.json({ message: 'Review removed and reason recorded.' });
-  }));
-
-  router.get('/messages', [
-    query('status').optional().isIn(['new', 'in_progress', 'resolved', 'all']).withMessage('Choose a valid message status.'),
-    query('search').optional().trim().isLength({ max: 100 }).withMessage('Search text cannot exceed 100 characters.'),
-    query('page').optional().isInt({ min: 1 }).toInt(),
-    query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const exists = await tableExists(pool, 'contact_messages');
-    if (!exists) {
-      return res.json({ messages: [], pagination: buildPagination(1, 20, 0) });
-    }
-
-    const status = req.query.status || 'all';
-    const hasPagination = req.query.page !== undefined || req.query.limit !== undefined;
-    const page = hasPagination ? toPositiveInt(req.query.page, 1) : 1;
-    const limit = hasPagination ? Math.min(100, toPositiveInt(req.query.limit, 20)) : 20;
-    const filters = [];
-    const values = [];
-
-    if (status !== 'all') {
-      filters.push('status = ?');
-      values.push(status);
-    }
-    const search = (req.query.search || '').trim();
-    if (search) {
-      filters.push('(name LIKE ? OR email LIKE ? OR subject LIKE ? OR message LIKE ?)');
-      const term = `%${search}%`;
-      values.push(term, term, term, term);
-    }
-
-    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-    const [countRows] = await pool.execute(`SELECT COUNT(*) AS total FROM contact_messages ${whereClause}`, values);
-    const total = Number(countRows[0].total || 0);
-    const pagination = buildPagination(page, limit, total);
-
-    const sql = hasPagination
-      ? `SELECT
-         id,
-         name,
-         email,
-         subject,
-         message,
-         status,
-         created_at AS createdAt,
-         updated_at AS updatedAt
-       FROM contact_messages
-       ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`
-      : `SELECT
-         id,
-         name,
-         email,
-         subject,
-         message,
-         status,
-         created_at AS createdAt,
-         updated_at AS updatedAt
-       FROM contact_messages
-       ${whereClause}
-       ORDER BY created_at DESC`;
-
-    const queryValues = hasPagination ? [...values, pagination.limit, (pagination.page - 1) * pagination.limit] : values;
-    const [rows] = await pool.execute(sql, queryValues);
-
-    res.json({ messages: rows, pagination: hasPagination ? pagination : { page: 1, limit: rows.length || 0, total, totalPages: 1, hasNextPage: false } });
-  }));
-
-  router.get('/messages/:id', [
-    param('id').isInt({ min: 1 }).withMessage('Message ID must be a positive integer.').toInt(),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const exists = await tableExists(pool, 'contact_messages');
-    if (!exists) {
-      return res.status(404).json({ error: 'Contact messages are not available in this installation.' });
-    }
-    const [rows] = await pool.execute(
+    const result = await pool.query(
       `SELECT
-         id, name, email, subject, message, status,
-         created_at AS createdAt, updated_at AS updatedAt
-       FROM contact_messages
-       WHERE id = ?
-       LIMIT 1`,
-      [req.params.id]
+        r.id,
+        r.booking_id AS "bookingId",
+        r.customer_id AS "customerId",
+        cu.full_name AS "customerName",
+        r.provider_id AS "providerId",
+        pu.full_name AS "providerName",
+        r.rating,
+        r.comment,
+        r.created_at AS "createdAt"
+       FROM reviews r
+       JOIN users cu ON cu.id = r.customer_id
+       JOIN users pu ON pu.id = r.provider_id
+       ${where}
+       ORDER BY r.created_at DESC
+       LIMIT $${listValues.length - 1}
+       OFFSET $${listValues.length}`,
+      listValues
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'Message not found.' });
-    res.json({ message: rows[0] });
-  }));
-
-  router.patch('/messages/:id/status', [
-    param('id').isInt({ min: 1 }).withMessage('Message ID must be a positive integer.').toInt(),
-    body('status').isIn(['new', 'in_progress', 'resolved']).withMessage('Choose new, in_progress, or resolved.'),
-    validateRequest
-  ], asyncHandler(async (req, res) => {
-    const exists = await tableExists(pool, 'contact_messages');
-    if (!exists) {
-      return res.status(404).json({ error: 'Contact messages are not available in this installation.' });
-    }
-
-    const [result] = await pool.execute(
-      'UPDATE contact_messages SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [req.body.status, req.params.id]
-    );
-
-    if (result.affectedRows !== 1) {
-      const [rows] = await pool.execute('SELECT id FROM contact_messages WHERE id = ? LIMIT 1', [req.params.id]);
-      if (rows.length === 0) return res.status(404).json({ error: 'Message not found.' });
-    }
 
     res.json({
-      message: 'Message status updated.',
-      contactMessage: { id: Number(req.params.id), status: req.body.status }
+      reviews: result.rows,
+      pagination: paginationMeta(
+        page,
+        limit,
+        countResult.rows[0].total
+      )
     });
   }));
 
-  return router;
+  router.delete('/reviews/:reviewId', [
+    param('reviewId').isInt({ min: 1 }),
+   body('reason')
+  .optional()
+  .isString()
+  .bail()
+  .trim()
+  .isLength({ max: 1000 }),
+   validateRequest
+  ], asyncHandler(async (req, res) => {
+    const reviewId = Number(req.params.reviewId);
+    const adminId = adminIdFromRequest(req);
+    const reason = String(req.body.reason || '').trim();
+
+    const outcome = await withTransaction(pool, async (client) => {
+      const review = await client.query(
+        `SELECT id FROM reviews WHERE id = $1 FOR UPDATE`,
+        [reviewId]
+      );
+
+      if (!review.rowCount) return false;
+
+      await client.query(
+        `DELETE FROM reviews WHERE id = $1`,
+        [reviewId]
+      );
+
+      await writeAuditLog(
+        client,
+        adminId,
+        'review',
+        reviewId,
+        'deleted',
+        reason || 'Review deleted by admin.'
+      );
+
+      return true;
+    });
+
+    if (!outcome) {
+      return res.status(404).json({
+        error: 'Review not found.'
+      });
+    }
+
+    res.json({ message: 'Review deleted successfully.' });
+  }));
+
+  // ==========================================
+  // CONTACT MESSAGES
+  // ==========================================
+
+
+router.get('/messages', asyncHandler(async (req, res) => {
+  const { page, limit, offset } = pagination(req);
+  const status = String(req.query.status || '').trim();
+
+  if (
+    status &&
+    status !== 'all' &&
+    !['new', 'in_progress', 'resolved'].includes(status)
+  ) {
+    return res.status(400).json({
+      error: 'Invalid message status filter.'
+    });
+  }
+
+  const values = [];
+  let where = '';
+
+  if (status && status !== 'all') {
+    values.push(status);
+    where = `WHERE status = $${values.length}`;
+  }
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total
+     FROM contact_messages
+     ${where}`,
+    values
+  );
+
+  const listValues = [...values, limit, offset];
+
+  const result = await pool.query(
+    `SELECT
+      id,
+      name,
+      email,
+      subject,
+      message,
+      status,
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+     FROM contact_messages
+     ${where}
+     ORDER BY created_at DESC
+     LIMIT $${listValues.length - 1}
+     OFFSET $${listValues.length}`,
+    listValues
+  );
+
+  res.json({
+    messages: result.rows,
+    pagination: paginationMeta(
+      page,
+      limit,
+      countResult.rows[0].total
+    )
+  });
+}));
+
+
+
+const updateMessageStatusHandler = asyncHandler(async (req, res) => {
+  const messageId = Number(req.params.messageId);
+  const status = String(req.body.status).trim();
+  const adminId = adminIdFromRequest(req);
+
+  const contactMessage = await withTransaction(pool, async (client) => {
+    const result = await client.query(
+      `UPDATE contact_messages
+       SET status = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING id, status`,
+      [status, messageId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    await writeAuditLog(
+      client,
+      adminId,
+      'contact_message',
+      messageId,
+      'status_updated',
+      `Contact message status changed to ${status}.`
+    );
+
+    return result.rows[0];
+  });
+
+  if (!contactMessage) {
+    return res.status(404).json({
+      error: 'Contact message not found.'
+    });
+  }
+
+  res.json({
+    message: 'Message status updated.',
+    contactMessage
+  });
+});
+
+router.patch('/messages/:messageId/status', [
+  param('messageId').isInt({ min: 1 }),
+  body('status').isIn(['new', 'in_progress', 'resolved']),
+  validateRequest
+], updateMessageStatusHandler);
+
+router.put('/messages/:messageId/status', [
+  param('messageId').isInt({ min: 1 }),
+  body('status').isIn(['new', 'in_progress', 'resolved']),
+  validateRequest
+], updateMessageStatusHandler);
+
+return router;
 }
 
 module.exports = { createAdminRouter };

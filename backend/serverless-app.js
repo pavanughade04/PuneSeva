@@ -16,7 +16,7 @@ const { createProviderRouter } = require('./routes/provider');
 const { createAdminRouter } = require('./routes/admin');
 const { createServicesRouter } = require('./routes/services');
 const { loadAuthSchema } = require('./services/auth-schema');
-const { MySQLSessionStore } = require('./services/mysql-session-store');
+const { PostgreSQLSessionStore } = require('./services/postgres-session-store')
 const { ensureContactMessagesTable } = require('./services/contact-schema');
 const { createContactRouter } = require('./routes/contact');
 
@@ -51,7 +51,7 @@ async function createApp() {
   const schema = await loadAuthSchema(pool);
   await ensureContactMessagesTable(pool);
 
-  const sessionStore = new MySQLSessionStore(pool);
+  const sessionStore = new PostgreSQLSessionStore(pool);
   await sessionStore.initialize({ serverless: true });
 
   app.disable('x-powered-by');

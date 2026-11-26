@@ -7,8 +7,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Local Netlify folder
-.netlify
 
 # Environment secrets
 .env
@@ -32,9 +30,3 @@ Thumbs.db
 # Dependencies
 node_modules/
 **/node_modules/
-
-# Netlify local files
-.netlify/
-**/.netlify/
-
-netlify-backup.toml

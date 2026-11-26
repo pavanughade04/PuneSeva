@@ -1,9 +1,13 @@
+﻿
+const { PassThrough } = require('node:stream');
+const cloudinary = require('../config/cloudinary');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const http = require('node:http');
 const path = require('node:path');
-const { after, test } = require('node:test');
+const { test } = require('node:test');
 const express = require('express');
+
 const { requireRole } = require('../middleware/auth');
 const { createAdminRouter } = require('../routes/admin');
 const { createProviderRouter } = require('../routes/provider');
@@ -11,16 +15,27 @@ const { createServicesRouter } = require('../routes/services');
 const { removeServiceImage } = require('../middleware/service-image-upload');
 
 const schema = {
-  users: new Set(['account_status'])
+  users: new Set(['is_active']),
+  services: new Set(['approval_status', 'price_type'])
 };
+
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, ' ').trim();
+}
 
 async function startServer(configure) {
   const app = express();
   app.use(express.json());
   configure(app);
+
   const server = http.createServer(app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  await new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
   const address = server.address();
+
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => {
@@ -32,26 +47,48 @@ async function startServer(configure) {
 function providerApp(pool, role = 'provider') {
   const app = express();
   app.use(express.json());
-  app.use('/api/provider', (req, res, next) => {
-    req.user = { id: 27, role };
-    next();
-  }, requireRole('provider'), createProviderRouter({ pool }));
+
+  app.use(
+    '/api/provider',
+    (req, res, next) => {
+      req.user = { id: 27, role };
+      next();
+    },
+    requireRole('provider'),
+    createProviderRouter({ pool, schema })
+  );
+
   return app;
 }
 
 function adminApp(pool, role = 'admin') {
   const app = express();
   app.use(express.json());
-  app.use('/api/admin', (req, res, next) => {
-    req.user = { id: 9, role };
-    next();
-  }, requireRole('admin'), createAdminRouter({ pool }));
+
+  app.use(
+    '/api/admin',
+    (req, res, next) => {
+      req.user = { id: 9, role };
+      next();
+    },
+    requireRole('admin'),
+    createAdminRouter({ pool, schema })
+  );
+
   return app;
 }
 
+function pgResult(rows = [], rowCount = rows.length) {
+  return { rows, rowCount };
+}
+
+// 1
 test('public services page is served by the frontend static route', async (t) => {
   const frontendPath = path.join(__dirname, '..', '..', 'frontend');
-  const server = await startServer((app) => app.use(express.static(frontendPath)));
+  const server = await startServer((app) => {
+    app.use(express.static(frontendPath));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/services.html`);
@@ -63,84 +100,111 @@ test('public services page is served by the frontend static route', async (t) =>
   assert.match(page, /src="\/js\/services\.js"/);
 });
 
+// 2
 test('public search only queries approved, available services and returns JSON', async (t) => {
   let executed;
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       executed = { sql, values };
-      return [[{
+
+      return pgResult([{
         id: 3,
         serviceName: 'House cleaning',
         category: 'Cleaning',
         image: '/uploads/cleaning.png',
-        isAvailable: 1,
+        isAvailable: true,
         createdAt: '2026-01-01T00:00:00.000Z'
-      }], []];
+      }]);
     }
   };
+
   const server = await startServer((app) => {
     app.use('/api/services', createServicesRouter({ pool, schema }));
   });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/services?search=clean&category=Cleaning&location=Kothrud&sort=price_asc`);
+  const response = await fetch(
+    `${server.baseUrl}/api/services?search=clean&category=Cleaning&location=Kothrud&sort=price_asc`
+  );
+
   const result = await response.json();
+  const sql = normalizeSql(executed.sql);
 
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('content-type').includes('application/json'), true);
-  assert.match(executed.sql, /s\.approval_status = \?/);
-  assert.match(executed.sql, /s\.is_available = 1/);
-  assert.match(executed.sql, /p\.approval_status = \?/);
-  assert.match(executed.sql, /s\.location LIKE \?/);
-  assert.match(executed.sql, /ORDER BY s\.price ASC, s\.id ASC/);
+  assert.equal(
+    response.headers.get('content-type').includes('application/json'),
+    true
+  );
+
+  assert.match(sql, /s\.approval_status = \$\d+/);
+  assert.match(sql, /s\.is_available = TRUE/);
+  assert.match(sql, /p\.approval_status = \$\d+/);
+  assert.match(sql, /s\.location ILIKE \$\d+/);
+  assert.match(sql, /ORDER BY s\.price ASC, s\.id ASC/);
+
   assert.ok(executed.values.includes('Cleaning'));
   assert.ok(executed.values.includes('%Kothrud%'));
   assert.ok(executed.values.includes('%clean%'));
+
   assert.equal(result.services[0].isAvailable, true);
   assert.equal(result.services[0].image, '/uploads/cleaning.png');
 });
 
+// 3
 test('public service details hide unavailable and unapproved listings', async (t) => {
   let executed;
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       executed = { sql, values };
-      return [[], []];
+      return pgResult([]);
     }
   };
+
   const server = await startServer((app) => {
     app.use('/api/services', createServicesRouter({ pool, schema }));
   });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/services/41`);
   const result = await response.json();
+  const sql = normalizeSql(executed.sql);
 
   assert.equal(response.status, 404);
   assert.equal(result.error, 'Service not found.');
-  assert.match(executed.sql, /s\.approval_status = \?/);
-  assert.match(executed.sql, /s\.is_available = 1/);
+  assert.match(sql, /s\.approval_status = \$\d+/);
+  assert.match(sql, /s\.is_available = TRUE/);
   assert.deepEqual(executed.values, [41, 'approved', 'approved']);
 });
 
+// 4
 test('provider-created services are pending and tied to the session provider', async (t) => {
   const calls = [];
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       calls.push({ sql, values });
-      if (sql.includes('SELECT approval_status FROM provider_profiles')) {
-        return [[{ approval_status: 'approved' }], []];
+      const normalized = normalizeSql(sql);
+
+      if (normalized.startsWith('SELECT approval_status FROM provider_profiles')) {
+        return pgResult([{ approval_status: 'approved' }]);
       }
-      if (sql.includes('INSERT INTO services')) return [{ insertId: 55, affectedRows: 1 }, []];
+
+      if (normalized.startsWith('INSERT INTO services')) {
+        return pgResult([{ id: 55 }], 1);
+      }
+
       throw new Error('Unexpected SQL in test: ' + sql);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/provider', (req, res, next) => {
-      req.user = { id: 27, role: 'provider' };
-      next();
-    }, requireRole('provider'), createProviderRouter({ pool }));
+    app.use(providerApp(pool));
   });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services`, {
@@ -156,37 +220,78 @@ test('provider-created services are pending and tied to the session provider', a
       isAvailable: true
     })
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 201);
   assert.equal(result.service.approvalStatus, 'pending');
   assert.equal(result.service.location, 'Kothrud, Pune');
+  assert.equal(calls.length, 2);
   assert.equal(calls[1].values[0], 27);
   assert.ok(calls[1].values.includes('Kothrud, Pune'));
   assert.match(calls[1].sql, /'pending'/);
+  assert.match(calls[1].sql, /RETURNING id/);
 });
 
+// 5
 test('provider can upload a validated image with a service', async (t) => {
   const calls = [];
+  let uploadedOptions;
+
+  t.mock.method(
+    cloudinary.uploader,
+    'upload_stream',
+    (options, callback) => {
+      uploadedOptions = options;
+
+      const stream = new PassThrough();
+
+      stream.on('finish', () => {
+        callback(null, {
+          secure_url: `https://res.cloudinary.com/test/image/upload/${options.public_id}.png`
+        });
+      });
+
+      return stream;
+    }
+  );
+
+  t.mock.method(
+    cloudinary.uploader,
+    'destroy',
+    async () => ({ result: 'ok' })
+  );
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       calls.push({ sql, values });
-      if (sql.includes('SELECT approval_status FROM provider_profiles')) {
-        return [[{ approval_status: 'approved' }], []];
+      const normalized = normalizeSql(sql);
+
+      if (normalized.startsWith('SELECT approval_status FROM provider_profiles')) {
+        return pgResult([{ approval_status: 'approved' }]);
       }
-      if (sql.includes('INSERT INTO services')) return [{ insertId: 56, affectedRows: 1 }, []];
+
+      if (normalized.startsWith('INSERT INTO services')) {
+        return pgResult([{ id: 56 }], 1);
+      }
+
       throw new Error('Unexpected SQL in test: ' + sql);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/provider', (req, res, next) => {
-      req.user = { id: 27, role: 'provider' };
-      next();
-    }, requireRole('provider'), createProviderRouter({ pool }));
+    app.use(providerApp(pool));
   });
+
   t.after(() => server.close());
 
+  const imageBuffer = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47,
+    0x0d, 0x0a, 0x1a, 0x0a
+  ]);
+
   const form = new FormData();
+
   form.append('serviceName', 'Home cleaning');
   form.append('category', 'Cleaning');
   form.append('description', 'Cleaning for apartments and houses.');
@@ -194,50 +299,58 @@ test('provider can upload a validated image with a service', async (t) => {
   form.append('price', '500');
   form.append('priceType', 'fixed');
   form.append('isAvailable', 'true');
-  form.append('image', new Blob([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-  ], { type: 'image/png' }), 'service.png');
+
+  form.append(
+    'image',
+    new Blob([imageBuffer], { type: 'image/png' }),
+    'service.png'
+  );
 
   const response = await fetch(`${server.baseUrl}/api/provider/services`, {
     method: 'POST',
     body: form
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 201);
-  assert.match(result.service.image, /^\/uploads\/[0-9a-f-]{36}\.png$/);
+
+  assert.match(
+    result.service.image,
+    /^https:\/\/res\.cloudinary\.com\/test\/image\/upload\/[0-9a-f-]{36}\.png$/
+  );
+
   assert.ok(calls[1].values.includes(result.service.image));
-  const filename = result.service.image.split('/').pop();
-  try {
-    const stored = await fs.readFile(require('node:path').join(__dirname, '..', 'uploads', filename));
-    assert.deepEqual(stored, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  } finally {
-    await removeServiceImage(filename);
-  }
+  assert.equal(uploadedOptions.resource_type, 'image');
+  assert.equal(uploadedOptions.overwrite, false);
+  assert.ok(uploadedOptions.public_id);
 });
 
+// 6
 test('provider image upload rejects content that does not match its image type', async (t) => {
   let databaseCalled = false;
+
   const pool = {
-    execute: async () => {
+    query: async () => {
       databaseCalled = true;
-      return [[{ approval_status: 'approved' }], []];
+      return pgResult([{ approval_status: 'approved' }]);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/provider', (req, res, next) => {
-      req.user = { id: 27, role: 'provider' };
-      next();
-    }, requireRole('provider'), createProviderRouter({ pool }));
+    app.use(providerApp(pool));
   });
+
   t.after(() => server.close());
 
   const form = new FormData();
   form.append('image', new Blob(['not a png'], { type: 'image/png' }), 'fake.png');
+
   const response = await fetch(`${server.baseUrl}/api/provider/services`, {
     method: 'POST',
     body: form
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 400);
@@ -245,21 +358,28 @@ test('provider image upload rejects content that does not match its image type',
   assert.equal(databaseCalled, false);
 });
 
+// 7
 test('provider service list is scoped to the signed-in provider', async (t) => {
   let executed;
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       executed = { sql, values };
-      return [[{
+
+      return pgResult([{
         id: 55,
         serviceName: 'Home cleaning',
         location: 'Kothrud, Pune',
-        isAvailable: 1,
+        isAvailable: true,
         approvalStatus: 'approved'
-      }], []];
+      }]);
     }
   };
-  const server = await startServer((app) => app.use(providerApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(providerApp(pool));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services`);
@@ -267,26 +387,36 @@ test('provider service list is scoped to the signed-in provider', async (t) => {
 
   assert.equal(response.status, 200);
   assert.deepEqual(executed.values, [27]);
-  assert.match(executed.sql, /WHERE provider_id = \?/);
+  assert.match(normalizeSql(executed.sql), /WHERE provider_id = \$1/);
   assert.equal(result.services[0].location, 'Kothrud, Pune');
   assert.equal(result.services[0].isAvailable, true);
 });
 
+// 8
 test('provider cannot edit another provider service', async (t) => {
   const calls = [];
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       calls.push({ sql, values });
-      if (sql.includes('SELECT approval_status FROM provider_profiles')) {
-        return [[{ approval_status: 'approved' }], []];
+      const normalized = normalizeSql(sql);
+
+      if (normalized.startsWith('SELECT approval_status FROM provider_profiles')) {
+        return pgResult([{ approval_status: 'approved' }]);
       }
-      if (sql.startsWith('SELECT image FROM services')) return [[], []];
-      if (sql.startsWith('UPDATE services')) return [{ affectedRows: 0 }, []];
-      if (sql.includes('SELECT id FROM services')) return [[], []];
+
+      if (normalized.startsWith('SELECT image FROM services')) {
+        return pgResult([]);
+      }
+
       throw new Error('Unexpected SQL in test: ' + sql);
     }
   };
-  const server = await startServer((app) => app.use(providerApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(providerApp(pool));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services/88`, {
@@ -302,37 +432,58 @@ test('provider cannot edit another provider service', async (t) => {
       isAvailable: false
     })
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 404);
   assert.equal(result.error, 'Service not found.');
-  assert.ok(calls[1].values.includes(27));
-  assert.match(calls[1].sql, /WHERE id = \? AND provider_id = \?/);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].values, [88, 27]);
+  assert.match(
+    normalizeSql(calls[1].sql),
+    /WHERE id = \$1 AND provider_id = \$2/
+  );
 });
 
+// 9
 test('provider edits reset service approval and save its location', async (t) => {
   const calls = [];
+
   const pool = {
-    execute: async (sql, values) => {
+    query: async (sql, values) => {
       calls.push({ sql, values });
-      if (sql.includes('SELECT approval_status FROM provider_profiles')) {
-        return [[{ approval_status: 'approved' }], []];
+      const normalized = normalizeSql(sql);
+
+      if (normalized.startsWith('SELECT approval_status FROM provider_profiles')) {
+        return pgResult([{ approval_status: 'approved' }]);
       }
-      if (sql.startsWith('SELECT image FROM services')) return [[{ image: null }], []];
-      if (sql.startsWith('UPDATE services')) return [{ affectedRows: 1 }, []];
-      if (sql.includes('FROM services') && sql.includes('WHERE id = ? AND provider_id = ?')) {
-        return [[{
+
+      if (normalized.startsWith('SELECT image FROM services')) {
+        return pgResult([{ image: null }]);
+      }
+
+      if (normalized.startsWith('UPDATE services')) {
+        return pgResult([], 1);
+      }
+
+      if (normalized.startsWith('SELECT id, service_name')) {
+        return pgResult([{
           id: 88,
           serviceName: 'Home cleaning',
           location: 'Baner, Pune',
-          isAvailable: 1,
+          isAvailable: true,
           approvalStatus: 'pending'
-        }], []];
+        }]);
       }
+
       throw new Error('Unexpected SQL in test: ' + sql);
     }
   };
-  const server = await startServer((app) => app.use(providerApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(providerApp(pool));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services/88`, {
@@ -348,6 +499,7 @@ test('provider edits reset service approval and save its location', async (t) =>
       isAvailable: true
     })
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 200);
@@ -357,15 +509,21 @@ test('provider edits reset service approval and save its location', async (t) =>
   assert.ok(calls[2].values.includes('Baner, Pune'));
 });
 
+// 10
 test('provider service validation rejects missing locations before database access', async (t) => {
   let databaseCalled = false;
+
   const pool = {
-    execute: async () => {
+    query: async () => {
       databaseCalled = true;
-      return [[], []];
+      return pgResult([]);
     }
   };
-  const server = await startServer((app) => app.use(providerApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(providerApp(pool));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services`, {
@@ -379,6 +537,7 @@ test('provider service validation rejects missing locations before database acce
       isAvailable: false
     })
   });
+
   const result = await response.json();
 
   assert.equal(response.status, 400);
@@ -387,188 +546,331 @@ test('provider service validation rejects missing locations before database acce
   assert.ok(result.details.some((detail) => detail.field === 'price'));
 });
 
+// 11
 test('service with booking history cannot be deleted', async (t) => {
   const pool = {
-    execute: async () => {
-      const error = new Error('Foreign key constraint');
-      error.code = 'ER_ROW_IS_REFERENCED_2';
-      throw error;
-    }
-  };
-  const server = await startServer((app) => app.use(providerApp(pool)));
-  t.after(() => server.close());
+    query: async (sql) => {
+      const normalized = normalizeSql(sql);
 
-  const response = await fetch(`${server.baseUrl}/api/provider/services/88`, { method: 'DELETE' });
-  const result = await response.json();
-  assert.equal(response.status, 409);
-  assert.equal(result.error, 'This service has booking history and cannot be deleted.');
-});
-
-test('provider availability changes are ownership-scoped', async (t) => {
-  const calls = [];
-  const pool = {
-    execute: async (sql, values) => {
-      calls.push({ sql, values });
-      if (sql.includes('SELECT approval_status FROM provider_profiles')) {
-        return [[{ approval_status: 'approved' }], []];
+      if (normalized.startsWith('SELECT image FROM services')) {
+        return pgResult([{ image: null }]);
       }
-      if (sql.startsWith('UPDATE services')) return [{ affectedRows: 1 }, []];
+
+      if (normalized.startsWith('DELETE FROM services')) {
+        const error = new Error('Foreign key constraint');
+        error.code = '23503';
+        throw error;
+      }
+
       throw new Error('Unexpected SQL in test: ' + sql);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/provider', (req, res, next) => {
-      req.user = { id: 27, role: 'provider' };
-      next();
-    }, requireRole('provider'), createProviderRouter({ pool }));
+    app.use(providerApp(pool));
   });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/provider/services/88/availability`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ isAvailable: true })
+  const response = await fetch(
+    `${server.baseUrl}/api/provider/services/88`,
+    { method: 'DELETE' }
+  );
+
+  const result = await response.json();
+
+  assert.equal(response.status, 409);
+  assert.equal(
+    result.error,
+    'This service has booking history and cannot be deleted.'
+  );
+});
+
+// 12
+test('provider availability changes are ownership-scoped', async (t) => {
+  const calls = [];
+
+  const pool = {
+    query: async (sql, values) => {
+      calls.push({ sql, values });
+      const normalized = normalizeSql(sql);
+
+      if (normalized.startsWith('SELECT approval_status FROM provider_profiles')) {
+        return pgResult([{ approval_status: 'approved' }]);
+      }
+
+      if (normalized.startsWith('UPDATE services')) {
+        return pgResult([], 1);
+      }
+
+      throw new Error('Unexpected SQL in test: ' + sql);
+    }
+  };
+
+  const server = await startServer((app) => {
+    app.use(providerApp(pool));
   });
+
+  t.after(() => server.close());
+
+  const response = await fetch(
+    `${server.baseUrl}/api/provider/services/88/availability`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isAvailable: true })
+    }
+  );
+
   const result = await response.json();
 
   assert.equal(response.status, 200);
   assert.deepEqual(result.service, { id: 88, isAvailable: true });
-  assert.deepEqual(calls[1].values, [1, 88, 27]);
-  assert.match(calls[1].sql, /WHERE id = \? AND provider_id = \?/);
+  assert.deepEqual(calls[1].values, [true, 88, 27]);
+  assert.match(
+    normalizeSql(calls[1].sql),
+    /WHERE id = \$2 AND provider_id = \$3/
+  );
 });
 
+// 13
 test('customer role cannot access provider service management', async (t) => {
   let databaseCalled = false;
+
   const pool = {
-    execute: async () => {
+    query: async () => {
       databaseCalled = true;
-      return [[], []];
+      return pgResult([]);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/provider', (req, res, next) => {
-      req.user = { id: 27, role: 'customer' };
-      next();
-    }, requireRole('provider'), createProviderRouter({ pool }));
+    app.use(providerApp(pool, 'customer'));
   });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/provider/services`);
+
   assert.equal(response.status, 403);
   assert.equal(databaseCalled, false);
 });
 
+// 14
 test('only admins can approve or reject services', async (t) => {
   let databaseCalled = false;
+
   const pool = {
-    execute: async () => {
+    query: async () => {
       databaseCalled = true;
-      return [{ affectedRows: 1 }, []];
+      return pgResult([], 1);
     }
   };
+
   const server = await startServer((app) => {
-    app.use('/api/admin', (req, res, next) => {
-      req.user = { id: 27, role: 'provider' };
-      next();
-    }, requireRole('admin'), createAdminRouter({ pool }));
+    app.use(adminApp(pool, 'provider'));
   });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/admin/services/88/approval`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ approvalStatus: 'approved' })
-  });
+  const response = await fetch(
+    `${server.baseUrl}/api/admin/services/88/approval`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approvalStatus: 'approved' })
+    }
+  );
+
   assert.equal(response.status, 403);
   assert.equal(databaseCalled, false);
 });
 
+// 15
 test('admin can list provider profiles with a parameterized status filter', async (t) => {
-  let executed;
+  const calls = [];
+
   const pool = {
-    execute: async (sql, values) => {
-      executed = { sql, values };
-      return [[{
-        providerId: 27,
+    query: async (sql, values) => {
+      calls.push({ sql, values });
+
+      if (normalizeSql(sql).startsWith('SELECT COUNT(*)')) {
+        return pgResult([{ total: '1' }]);
+      }
+
+      return pgResult([{
+        id: 27,
         fullName: 'Local Provider',
         businessName: 'Home Help',
         approvalStatus: 'pending'
-      }], []];
+      }]);
     }
   };
-  const server = await startServer((app) => app.use(adminApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(adminApp(pool));
+  });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/admin/providers?status=pending`);
+  const response = await fetch(
+    `${server.baseUrl}/api/admin/providers?status=pending`
+  );
+
   const result = await response.json();
+  const listCall = calls.find(
+    (call) => normalizeSql(call.sql).startsWith('SELECT u.id')
+  );
 
   assert.equal(response.status, 200);
   assert.equal(result.providers[0].approvalStatus, 'pending');
-  assert.match(executed.sql, /WHERE u\.role = \?\s+AND p\.approval_status = \?/);
-  assert.deepEqual(executed.values, ['provider', 'pending']);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].values, ['pending']);
+  assert.deepEqual(listCall.values, ['pending', 10, 0]);
+  assert.match(normalizeSql(listCall.sql), /u\.role = 'provider'/);
+  assert.match(normalizeSql(listCall.sql), /p\.approval_status = \$1/);
 });
 
+// 16
 test('admin service review queue includes listing locations', async (t) => {
-  let executed;
+  const calls = [];
+
   const pool = {
-    execute: async (sql, values) => {
-      executed = { sql, values };
-      return [[{
+    query: async (sql, values) => {
+      calls.push({ sql, values });
+
+      if (normalizeSql(sql).startsWith('SELECT COUNT(*)')) {
+        return pgResult([{ total: '1' }]);
+      }
+
+      return pgResult([{
         id: 55,
         serviceName: 'Home cleaning',
         location: 'Kothrud, Pune',
         approvalStatus: 'pending'
-      }], []];
+      }]);
     }
   };
-  const server = await startServer((app) => app.use(adminApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(adminApp(pool));
+  });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/admin/services`);
+  const response = await fetch(
+    `${server.baseUrl}/api/admin/services?status=pending`
+  );
+
   const result = await response.json();
+  const listCall = calls[1];
 
   assert.equal(response.status, 200);
-  assert.match(executed.sql, /s\.location/);
-  assert.deepEqual(executed.values, ['pending']);
+  assert.equal(calls.length, 2);
+  assert.match(listCall.sql, /s\.location/);
+  assert.deepEqual(calls[0].values, ['pending']);
+  assert.deepEqual(listCall.values, ['pending', 10, 0]);
   assert.equal(result.services[0].location, 'Kothrud, Pune');
 });
 
+// 17
 test('admin approval updates only the selected provider profile', async (t) => {
-  let executed;
+  const clientCalls = [];
+  const poolCalls = [];
+
+  const client = {
+    query: async (sql, values) => {
+      clientCalls.push({ sql, values });
+      const normalized = normalizeSql(sql);
+
+      if (normalized === 'BEGIN' || normalized === 'COMMIT' || normalized === 'ROLLBACK') {
+        return pgResult([]);
+      }
+
+      if (normalized.startsWith('SELECT p.user_id')) {
+        return pgResult([{ user_id: 27 }]);
+      }
+
+      if (normalized.startsWith('UPDATE provider_profiles')) {
+        return pgResult([], 1);
+      }
+
+      if (normalized.startsWith('INSERT INTO admin_audit_log')) {
+        return pgResult([], 1);
+      }
+
+      throw new Error('Unexpected client SQL in test: ' + sql);
+    },
+    release: () => {}
+  };
+
   const pool = {
-    execute: async (sql, values) => {
-      executed = { sql, values };
-      return [{ affectedRows: 1 }, []];
+    connect: async () => client,
+    query: async (sql, values) => {
+      poolCalls.push({ sql, values });
+      throw new Error('Unexpected pool query in transaction test: ' + sql);
     }
   };
-  const server = await startServer((app) => app.use(adminApp(pool)));
+
+  const server = await startServer((app) => {
+    app.use(adminApp(pool));
+  });
+
   t.after(() => server.close());
 
-  const response = await fetch(`${server.baseUrl}/api/admin/providers/27/approval`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ approvalStatus: 'approved' })
-  });
+  const response = await fetch(
+    `${server.baseUrl}/api/admin/providers/27/approve`,
+    {
+      method: 'PATCH'
+    }
+  );
+
   const result = await response.json();
 
   assert.equal(response.status, 200);
-  assert.deepEqual(result.provider, { id: 27, approvalStatus: 'approved' });
-  assert.deepEqual(executed.values, ['approved', 27, 'provider']);
-  assert.match(executed.sql, /WHERE p\.user_id = \? AND u\.role = \?/);
+  assert.deepEqual(result.provider, {
+    userId: 27,
+    approvalStatus: 'approved'
+  });
+
+  const updateCall = clientCalls.find(
+    (call) => normalizeSql(call.sql).startsWith('UPDATE provider_profiles')
+  );
+
+  assert.deepEqual(updateCall.values, [27]);
+  assert.match(
+    normalizeSql(updateCall.sql),
+    /SET approval_status = 'approved' WHERE user_id = \$1/
+  );
+
+  assert.ok(
+    clientCalls.some((call) =>
+      normalizeSql(call.sql).startsWith('INSERT INTO admin_audit_log')
+    )
+  );
+
+  assert.equal(poolCalls.length, 0);
 });
 
+// 18
 test('non-admin cannot access provider approval APIs', async (t) => {
   let databaseCalled = false;
+
   const pool = {
-    execute: async () => {
+    query: async () => {
       databaseCalled = true;
-      return [[], []];
+      return pgResult([]);
     }
   };
-  const server = await startServer((app) => app.use(adminApp(pool, 'provider')));
+
+  const server = await startServer((app) => {
+    app.use(adminApp(pool, 'provider'));
+  });
+
   t.after(() => server.close());
 
   const response = await fetch(`${server.baseUrl}/api/admin/providers`);
+
   assert.equal(response.status, 403);
   assert.equal(databaseCalled, false);
 });

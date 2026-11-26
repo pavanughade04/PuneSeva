@@ -19,45 +19,41 @@ function validateRequest(req, res, next) {
 function createServicesRouter({ pool, schema }) {
   const router = express.Router();
 
-  const priceTypeExpression = schema?.services?.has('price_type')
-    ? 's.price_type'
-    : "'fixed'";
-
   router.get('/locations', asyncHandler(async (req, res) => {
-    const [rows] = await pool.execute(
+    const result = await pool.query(
       `SELECT DISTINCT s.location
        FROM services AS s
        JOIN provider_profiles AS p ON p.user_id = s.provider_id
        JOIN users AS provider ON provider.id = p.user_id
-       WHERE s.approval_status = ?
-         AND s.is_available = 1
-         AND p.approval_status = ?
+       WHERE s.approval_status = $1
+         AND s.is_available = TRUE
+         AND p.approval_status = $2
          AND ${isActiveCondition(schema, 'provider')}
        ORDER BY s.location`,
       ['approved', 'approved']
     );
 
     res.json({
-      locations: rows.map((row) => row.location)
+      locations: result.rows.map((row) => row.location)
     });
   }));
 
   router.get('/categories', asyncHandler(async (req, res) => {
-    const [rows] = await pool.execute(
+    const result = await pool.query(
       `SELECT DISTINCT s.category
        FROM services AS s
        JOIN provider_profiles AS p ON p.user_id = s.provider_id
        JOIN users AS provider ON provider.id = p.user_id
-       WHERE s.approval_status = ?
-         AND s.is_available = 1
-         AND p.approval_status = ?
+       WHERE s.approval_status = $1
+         AND s.is_available = TRUE
+         AND p.approval_status = $2
          AND ${isActiveCondition(schema, 'provider')}
        ORDER BY s.category`,
       ['approved', 'approved']
     );
 
     res.json({
-      categories: rows.map((row) => row.category)
+      categories: result.rows.map((row) => row.category)
     });
   }));
 
@@ -68,42 +64,42 @@ function createServicesRouter({ pool, schema }) {
       .toInt(),
     validateRequest
   ], asyncHandler(async (req, res) => {
-    const [rows] = await pool.execute(
+    const result = await pool.query(
       `SELECT
          s.id,
-         s.service_name AS serviceName,
+         s.service_name AS "serviceName",
          s.category,
          s.description,
          s.location,
          s.image,
          s.price,
-         ${priceTypeExpression} AS priceType,
-         s.is_available AS isAvailable,
-         s.created_at AS createdAt,
-         p.user_id AS providerId,
-         provider.full_name AS providerName,
-         p.business_name AS businessName,
-         p.service_area AS serviceArea
+         s.price_type AS "priceType",
+         s.is_available AS "isAvailable",
+         s.created_at AS "createdAt",
+         p.user_id AS "providerId",
+         provider.full_name AS "providerName",
+         p.business_name AS "businessName",
+         p.service_area AS "serviceArea"
        FROM services AS s
        JOIN provider_profiles AS p ON p.user_id = s.provider_id
        JOIN users AS provider ON provider.id = p.user_id
-       WHERE s.id = ?
-         AND s.approval_status = ?
-         AND s.is_available = 1
-         AND p.approval_status = ?
+       WHERE s.id = $1
+         AND s.approval_status = $2
+         AND s.is_available = TRUE
+         AND p.approval_status = $3
          AND ${isActiveCondition(schema, 'provider')}
        LIMIT 1`,
       [req.params.serviceId, 'approved', 'approved']
     );
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Service not found.' });
     }
 
     res.json({
       service: {
-        ...rows[0],
-        isAvailable: Boolean(rows[0].isAvailable)
+        ...result.rows[0],
+        isAvailable: Boolean(result.rows[0].isAvailable)
       }
     });
   }));
@@ -141,39 +137,40 @@ function createServicesRouter({ pool, schema }) {
     validateRequest
   ], asyncHandler(async (req, res) => {
     const conditions = [
-      's.approval_status = ?',
-      's.is_available = 1',
-      'p.approval_status = ?',
+      's.approval_status = $1',
+      's.is_available = TRUE',
+      'p.approval_status = $2',
       isActiveCondition(schema, 'provider')
     ];
 
     const values = ['approved', 'approved'];
 
     if (req.query.category) {
-      conditions.push('s.category = ?');
       values.push(req.query.category);
+      conditions.push(`s.category = $${values.length}`);
     }
 
     if (req.query.location) {
-      conditions.push('s.location LIKE ?');
       values.push(`%${req.query.location}%`);
+      conditions.push(`s.location ILIKE $${values.length}`);
     }
 
     if (req.query.search) {
-      conditions.push(
-        '(s.service_name LIKE ? OR s.category LIKE ? OR s.description LIKE ? OR s.location LIKE ? OR provider.full_name LIKE ? OR p.business_name LIKE ?)'
-      );
-
       const searchTerm = `%${req.query.search}%`;
 
-      values.push(
-        searchTerm,
-        searchTerm,
-        searchTerm,
-        searchTerm,
-        searchTerm,
-        searchTerm
-      );
+      const searchConditions = [
+        's.service_name ILIKE',
+        's.category ILIKE',
+        's.description ILIKE',
+        's.location ILIKE',
+        'provider.full_name ILIKE',
+        'p.business_name ILIKE'
+      ].map((condition) => {
+        values.push(searchTerm);
+        return `${condition} $${values.length}`;
+      });
+
+      conditions.push(`(${searchConditions.join(' OR ')})`);
     }
 
     const orderBy = {
@@ -182,39 +179,39 @@ function createServicesRouter({ pool, schema }) {
       price_desc: 's.price DESC, s.id DESC'
     }[req.query.sort || 'newest'];
 
-    // LIMIT is converted to a validated integer.
-    // It is inserted into SQL only after validation.
     const limit = req.query.limit === undefined
       ? 24
       : Number(req.query.limit);
 
-    const [rows] = await pool.execute(
+    values.push(limit);
+
+    const result = await pool.query(
       `SELECT
          s.id,
-         s.service_name AS serviceName,
+         s.service_name AS "serviceName",
          s.category,
          s.description,
          s.location,
          s.image,
          s.price,
-         ${priceTypeExpression} AS priceType,
-         s.is_available AS isAvailable,
-         s.created_at AS createdAt,
-         p.user_id AS providerId,
-         provider.full_name AS providerName,
-         p.business_name AS businessName,
-         p.service_area AS serviceArea
+         s.price_type AS "priceType",
+         s.is_available AS "isAvailable",
+         s.created_at AS "createdAt",
+         p.user_id AS "providerId",
+         provider.full_name AS "providerName",
+         p.business_name AS "businessName",
+         p.service_area AS "serviceArea"
        FROM services AS s
        JOIN provider_profiles AS p ON p.user_id = s.provider_id
        JOIN users AS provider ON provider.id = p.user_id
        WHERE ${conditions.join(' AND ')}
        ORDER BY ${orderBy}
-       LIMIT ${limit}`,
+       LIMIT $${values.length}`,
       values
     );
 
     res.json({
-      services: rows.map((service) => ({
+      services: result.rows.map((service) => ({
         ...service,
         isAvailable: Boolean(service.isAvailable)
       }))

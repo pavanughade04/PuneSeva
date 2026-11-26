@@ -62,6 +62,7 @@ function uploadToCloudinary(buffer, publicId) {
       }
     );
 
+    uploadStream.on('error', reject);
     Readable.from(buffer).pipe(uploadStream);
   });
 }
@@ -123,6 +124,32 @@ function uploadServiceImage(req, res, next) {
 
       next();
     } catch (error) {
+      const responseBody = error.response?.body;
+
+      let responseMessage =
+        error.error?.message ||
+        responseBody?.error?.message ||
+        responseBody?.message ||
+        null;
+
+      if (!responseMessage && typeof responseBody === 'string') {
+        try {
+          const parsed = JSON.parse(responseBody);
+          responseMessage =
+            parsed.error?.message || parsed.message || null;
+        } catch {
+          responseMessage = null;
+        }
+      }
+
+      console.error('Cloudinary upload diagnostic:', {
+        httpStatus: error.http_code || error.response?.statusCode || null,
+        errorName: error.name || null,
+        message: error.message || null,
+        cloudinaryMessage: responseMessage,
+        errorProperties: Object.keys(error)
+      });
+
       next(error);
     }
   });
