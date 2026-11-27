@@ -18,7 +18,7 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'PuneSeva',
 
   ...(useSsl
-    ? { ssl: { rejectUnauthorized: true } }
+    ? { ssl: { rejectUnauthorized: false } }
     : {}),
 
   max: 10,
