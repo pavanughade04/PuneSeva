@@ -340,7 +340,6 @@ function createCustomerRouter({ pool, schema }) {
          b.rejection_reason AS "rejectionReason",
          b.status,
          b.total_amount AS "totalAmount",
-                 b.created_at AS "createdAt",
          EXISTS (
            SELECT 1
            FROM reviews AS r
